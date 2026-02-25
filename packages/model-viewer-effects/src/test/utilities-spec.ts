@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-import {ModelViewerElement} from '@solunea/model-viewer';
-import {Renderer} from '@solunea/model-viewer/lib/three-components/Renderer.js';
+import {ModelViewerElement} from '@google/model-viewer';
+import {Renderer} from '@google/model-viewer/lib/three-components/Renderer.js';
 import {expect} from 'chai';
 
 import {$effectComposer} from '../effect-composer.js';

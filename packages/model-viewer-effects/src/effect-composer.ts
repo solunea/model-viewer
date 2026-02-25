@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-import {ModelViewerElement} from '@solunea/model-viewer';
-import {ModelScene} from '@solunea/model-viewer/lib/three-components/ModelScene.js';
+import {ModelViewerElement} from '@google/model-viewer';
+import {ModelScene} from '@google/model-viewer/lib/three-components/ModelScene.js';
 import {ReactiveElement} from 'lit';
 import {property} from 'lit/decorators.js';
 import {EffectComposer as PPEffectComposer, EffectPass, NormalPass, Pass, RenderPass, Selection} from 'postprocessing';
@@ -28,7 +28,7 @@ const DUMMY_RENDERER = {
 
 import {IMVEffect, IntegrationOptions, MVEffectBase} from './effects/mixins/effect-base.js';
 import {disposeEffectPass, getOwnPropertySymbolValue, isConvolution, validateLiteralType} from './utilities.js';
-import {Renderer} from '@solunea/model-viewer/lib/three-components/Renderer.js';
+import {Renderer} from '@google/model-viewer/lib/three-components/Renderer.js';
 
 export const $scene = Symbol('scene');
 export const $composer = Symbol('composer');

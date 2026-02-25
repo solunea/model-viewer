@@ -1,13 +1,13 @@
 {
-  "name": "@solunea/model-viewer-effects",
+  "name": "@google/model-viewer-effects",
   "type": "module",
   "version": "1.4.0",
   "description": "Easily add and combine post-processing effects with <model-viewer>!",
-  "repository": "https://github.com/solunea/model-viewer/tree/master/packages/model-viewer-effects",
+  "repository": "https://github.com/google/model-viewer/tree/master/packages/model-viewer-effects",
   "bugs": {
-    "url": "https://github.com/solunea/model-viewer/issues"
+    "url": "https://github.com/google/model-viewer/issues"
   },
-  "homepage": "https://github.com/solunea/model-viewer/tree/master/packages/model-viewer-effects#readme",
+  "homepage": "https://github.com/google/model-viewer/tree/master/packages/model-viewer-effects#readme",
   "contributors": [
     "Adam Beili <adam.v.beili@gmail.com>"
   ],
@@ -76,10 +76,10 @@
     "postprocessing": "^6.38.3"
   },
   "peerDependencies": {
-    "@solunea/model-viewer": "^4.1.0"
+    "@google/model-viewer": "^4.1.0"
   },
   "devDependencies": {
-    "@solunea/model-viewer": "^4.1.0",
+    "@google/model-viewer": "^4.1.0",
     "@rollup/plugin-commonjs": "^28.0.3",
     "@rollup/plugin-node-resolve": "^16.0.0",
     "@rollup/plugin-replace": "^6.0.2",

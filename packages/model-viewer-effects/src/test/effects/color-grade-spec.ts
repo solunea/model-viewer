@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import {ModelViewerElement} from '@solunea/model-viewer';
+import {ModelViewerElement} from '@google/model-viewer';
 import {expect} from 'chai';
 
 import {ColorGradeEffect, EffectComposer} from '../../model-viewer-effects.js';
