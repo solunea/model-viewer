@@ -86,11 +86,11 @@ export class Shadow extends Object3D {
     if (side === 'bottom') {
       this.floor.rotation.x = -Math.PI / 2;
       this.floor.position.set(center.x, min.y, center.z);
-      this.floor.scale.set(this.size.x * 3, this.size.z * 3, 1);
+      this.floor.scale.set(this.size.x * 20, this.size.z * 20, 1);
     } else {
       this.floor.rotation.x = 0;
       this.floor.position.set(center.x, center.y, min.z);
-      this.floor.scale.set(this.size.x * 3, this.size.y * 3, 1);
+      this.floor.scale.set(this.size.x * 20, this.size.y * 20, 1);
     }
 
     this.updateLightPosition();
@@ -134,12 +134,12 @@ export class Shadow extends Object3D {
     this.light.target.updateMatrixWorld();
 
     // Fit shadow camera frustum to the bounding box
-    const halfSize = this.maxDimension * 1.5;
+    const halfSize = this.maxDimension * 10;
     this.light.shadow.camera.left = -halfSize;
     this.light.shadow.camera.right = halfSize;
     this.light.shadow.camera.top = halfSize;
     this.light.shadow.camera.bottom = -halfSize;
-    this.light.shadow.camera.far = radius * 3;
+    this.light.shadow.camera.far = radius * 20;
     this.light.shadow.camera.updateProjectionMatrix();
   }
 
