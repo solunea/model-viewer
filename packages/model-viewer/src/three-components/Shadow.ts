@@ -19,9 +19,9 @@ import {ModelScene} from './ModelScene.js';
 
 export type Side = 'back'|'bottom';
 
-// Default shadow orbit: 0° azimuth, 75° polar (from above, slightly angled)
+// Default shadow orbit: 0° azimuth, 0° polar (directly from above)
 const DEFAULT_SHADOW_THETA = 0;
-const DEFAULT_SHADOW_PHI = Math.PI * 75 / 180;
+const DEFAULT_SHADOW_PHI = 0;
 
 /**
  * Real Three.js shadow implementation using DirectionalLight + ShadowMaterial.

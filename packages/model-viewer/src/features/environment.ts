@@ -22,7 +22,7 @@ import {clamp, Constructor, deserializeUrl} from '../utilities.js';
 export const BASE_OPACITY = 0.5;
 const DEFAULT_SHADOW_INTENSITY = 0.0;
 const DEFAULT_SHADOW_SOFTNESS = 1.0;
-const DEFAULT_SHADOW_ORBIT = '0deg 75deg';
+const DEFAULT_SHADOW_ORBIT = '0deg 0deg';
 const DEFAULT_EXPOSURE = 1.0;
 
 export type ToneMappingValue = 'auto'|'aces'|'agx'|'commerce'|'neutral'|
@@ -91,9 +91,9 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
       if (changedProperties.has('shadowOrbit')) {
         const parts = this.shadowOrbit.trim().split(/\s+/);
         const thetaDeg = parts.length > 0 && parts[0] !== 'auto' ? parseFloat(parts[0]) : 0;
-        const phiDeg = parts.length > 1 && parts[1] !== 'auto' ? parseFloat(parts[1]) : 75;
+        const phiDeg = parts.length > 1 && parts[1] !== 'auto' ? parseFloat(parts[1]) : 0;
         const theta = (isNaN(thetaDeg) ? 0 : thetaDeg) * Math.PI / 180;
-        const phi = (isNaN(phiDeg) ? 75 : phiDeg) * Math.PI / 180;
+        const phi = (isNaN(phiDeg) ? 0 : phiDeg) * Math.PI / 180;
         this[$scene].setShadowOrbit(theta, phi);
         this[$needsRender]();
       }
