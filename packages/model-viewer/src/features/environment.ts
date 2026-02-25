@@ -53,13 +53,13 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
     @property({type: String, attribute: 'skybox-image'})
     skyboxImage: string|null = null;
 
-    @property({type: Number, attribute: 'shadow-intensity'})
+    @property({type: Number, attribute: 'shadow-intensity', hasChanged: () => true})
     shadowIntensity: number = DEFAULT_SHADOW_INTENSITY;
 
-    @property({type: Number, attribute: 'shadow-softness'})
+    @property({type: Number, attribute: 'shadow-softness', hasChanged: () => true})
     shadowSoftness: number = DEFAULT_SHADOW_SOFTNESS;
 
-    @property({type: String, attribute: 'shadow-orbit'})
+    @property({type: String, attribute: 'shadow-orbit', hasChanged: () => true})
     shadowOrbit: string = DEFAULT_SHADOW_ORBIT;
 
     @property({type: Number}) exposure: number = DEFAULT_EXPOSURE;
