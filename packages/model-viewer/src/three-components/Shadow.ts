@@ -266,6 +266,23 @@ export class Shadow extends Object3D {
     // LIGHT_WORLD_SIZE controls penumbra: 0 = sharp, scales with model size
     const lightSize = this.softness * this.maxDimension * 0.05;
     patchPCSS(lightSize, this.frustumWidth, this.nearPlane);
+
+    // Force materials to recompile with the new ShaderChunk
+    const mat = this.floor.material as ShadowMaterial;
+    mat.needsUpdate = true;
+
+    if (this.parent != null) {
+      this.parent.traverse((object) => {
+        if ((object as Mesh).isMesh) {
+          const meshMat = (object as Mesh).material;
+          if (Array.isArray(meshMat)) {
+            meshMat.forEach(m => m.needsUpdate = true);
+          } else if (meshMat != null) {
+            meshMat.needsUpdate = true;
+          }
+        }
+      });
+    }
   }
 
   /**
