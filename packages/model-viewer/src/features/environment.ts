@@ -22,6 +22,7 @@ import {clamp, Constructor, deserializeUrl} from '../utilities.js';
 export const BASE_OPACITY = 0.5;
 const DEFAULT_SHADOW_INTENSITY = 0.0;
 const DEFAULT_SHADOW_SOFTNESS = 1.0;
+const DEFAULT_SHADOW_ORBIT = '0deg 75deg';
 const DEFAULT_EXPOSURE = 1.0;
 
 export type ToneMappingValue = 'auto'|'aces'|'agx'|'commerce'|'neutral'|
@@ -38,6 +39,7 @@ export declare interface EnvironmentInterface {
   skyboxHeight: string;
   shadowIntensity: number;
   shadowSoftness: number;
+  shadowOrbit: string;
   exposure: number;
   hasBakedShadow(): boolean;
 }
@@ -56,6 +58,9 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     @property({type: Number, attribute: 'shadow-softness'})
     shadowSoftness: number = DEFAULT_SHADOW_SOFTNESS;
+
+    @property({type: String, attribute: 'shadow-orbit'})
+    shadowOrbit: string = DEFAULT_SHADOW_ORBIT;
 
     @property({type: Number}) exposure: number = DEFAULT_EXPOSURE;
 
@@ -80,6 +85,16 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
       if (changedProperties.has('shadowSoftness')) {
         this[$scene].setShadowSoftness(this.shadowSoftness);
+        this[$needsRender]();
+      }
+
+      if (changedProperties.has('shadowOrbit')) {
+        const parts = this.shadowOrbit.trim().split(/\s+/);
+        const thetaDeg = parseFloat(parts[0]) || 0;
+        const phiDeg = parseFloat(parts[1]) || 75;
+        const theta = thetaDeg * Math.PI / 180;
+        const phi = phiDeg * Math.PI / 180;
+        this[$scene].setShadowOrbit(theta, phi);
         this[$needsRender]();
       }
 

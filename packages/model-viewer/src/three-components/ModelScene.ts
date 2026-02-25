@@ -1098,6 +1098,17 @@ export class ModelScene extends Scene {
   }
 
   /**
+   * Sets the shadow light direction using spherical coordinates (radians).
+   * theta = azimuth angle around Y axis, phi = polar angle from Y axis.
+   */
+  setShadowOrbit(theta: number, phi: number) {
+    const shadow = this.shadow;
+    if (shadow != null) {
+      shadow.setOrbit(theta, phi);
+    }
+  }
+
+  /**
    * Shift the floor vertically from the bottom of the model's bounding box
    * by offset (should generally be negative).
    */

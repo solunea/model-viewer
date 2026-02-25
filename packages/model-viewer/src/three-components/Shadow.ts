@@ -19,12 +19,17 @@ import {ModelScene} from './ModelScene.js';
 
 export type Side = 'back'|'bottom';
 
+// Default shadow orbit: 0° azimuth, 75° polar (from above, slightly angled)
+const DEFAULT_SHADOW_THETA = 0;
+const DEFAULT_SHADOW_PHI = Math.PI * 75 / 180;
+
 /**
  * Real Three.js shadow implementation using DirectionalLight + ShadowMaterial.
  * Replaces the broken contact-shadow approach for Three.js r183+.
  *
  * shadow-intensity controls opacity of the shadow plane.
- * shadow-softness controls shadow map resolution (0=harsh/512, 1=soft/2048).
+ * shadow-softness controls shadow map resolution (0=soft/512, 1=crisp/2048).
+ * shadow-orbit controls the light direction as spherical coords (theta, phi).
  */
 export class Shadow extends Object3D {
   private light: DirectionalLight;
@@ -34,6 +39,8 @@ export class Shadow extends Object3D {
   private size = new Vector3();
   private maxDimension = 0;
   private side: Side = 'bottom';
+  private theta = DEFAULT_SHADOW_THETA;
+  private phi = DEFAULT_SHADOW_PHI;
   public needsUpdate = false;
 
   constructor(scene: ModelScene, softness: number, side: Side) {
@@ -43,18 +50,19 @@ export class Shadow extends Object3D {
     this.light.castShadow = true;
     this.light.shadow.camera.near = 0.1;
     this.light.shadow.camera.far = 100;
-    this.light.shadow.bias = -0.001;
+    this.light.shadow.bias = -0.002;
+    this.light.shadow.normalBias = 0.02;
     this.light.name = 'ShadowLight';
 
     const plane = new PlaneGeometry(1, 1);
-    const shadowMaterial = new ShadowMaterial({opacity: 0, transparent: true});
-    this.floor = new Mesh(plane, shadowMaterial);
+    const shadowMat = new ShadowMaterial({opacity: 0, transparent: true});
+    this.floor = new Mesh(plane, shadowMat);
     this.floor.receiveShadow = true;
     this.floor.userData.noHit = true;
     this.floor.name = 'ShadowFloor';
 
     this.add(this.light);
-    this.add(this.light.target); // Add light target to scene graph
+    this.add(this.light.target);
     this.add(this.floor);
 
     scene.target.add(this);
@@ -71,74 +79,75 @@ export class Shadow extends Object3D {
     this.boundingBox.getSize(this.size);
     this.maxDimension = Math.max(this.size.x, this.size.y, this.size.z);
 
-    const {min, max} = this.boundingBox;
+    const min = this.boundingBox.min;
     const center = new Vector3();
     this.boundingBox.getCenter(center);
 
     if (side === 'bottom') {
-      // Floor at bottom of model
       this.floor.rotation.x = -Math.PI / 2;
       this.floor.position.set(center.x, min.y, center.z);
-      this.floor.scale.set(
-          this.size.x * 3,
-          this.size.z * 3,
-          1,
-      );
-
-      // Light above the model, slightly offset
-      const lightHeight = (max.y - min.y) * 2 + 1;
-      this.light.position.set(
-          center.x + this.size.x * 0.5,
-          max.y + lightHeight,
-          center.z + this.size.z * 0.5,
-      );
-      this.light.target.position.copy(center);
-      this.light.target.updateMatrixWorld();
-
-      const halfSize = Math.max(this.size.x, this.size.z) * 1.5;
-      this.light.shadow.camera.left = -halfSize;
-      this.light.shadow.camera.right = halfSize;
-      this.light.shadow.camera.top = halfSize;
-      this.light.shadow.camera.bottom = -halfSize;
-      this.light.shadow.camera.far = lightHeight * 3;
-      this.light.shadow.camera.updateProjectionMatrix();
+      this.floor.scale.set(this.size.x * 3, this.size.z * 3, 1);
     } else {
-      // Wall shadow: floor behind the model
       this.floor.rotation.x = 0;
       this.floor.position.set(center.x, center.y, min.z);
-      this.floor.scale.set(
-          this.size.x * 3,
-          this.size.y * 3,
-          1,
-      );
-
-      const lightDepth = (max.z - min.z) * 2 + 1;
-      this.light.position.set(
-          center.x + this.size.x * 0.5,
-          center.y + this.size.y * 0.5,
-          max.z + lightDepth,
-      );
-      this.light.target.position.copy(center);
-      this.light.target.updateMatrixWorld();
-
-      const halfSize = Math.max(this.size.x, this.size.y) * 1.5;
-      this.light.shadow.camera.left = -halfSize;
-      this.light.shadow.camera.right = halfSize;
-      this.light.shadow.camera.top = halfSize;
-      this.light.shadow.camera.bottom = -halfSize;
-      this.light.shadow.camera.far = lightDepth * 3;
-      this.light.shadow.camera.updateProjectionMatrix();
+      this.floor.scale.set(this.size.x * 3, this.size.y * 3, 1);
     }
 
+    this.updateLightPosition();
     this.setSoftness(softness);
     this.needsUpdate = true;
   }
 
   /**
-   * Controls shadow map resolution. softness=0 → 2048 (crisp), softness=1 → 512 (soft).
+   * Set the shadow light direction using spherical coordinates.
+   * theta = azimuth angle (radians, around Y axis, 0 = front)
+   * phi = polar angle (radians, from Y axis, 0 = directly above)
+   */
+  setOrbit(theta: number, phi: number) {
+    this.theta = theta;
+    this.phi = phi;
+    this.updateLightPosition();
+    this.needsUpdate = true;
+  }
+
+  /**
+   * Position the DirectionalLight using current theta/phi spherical coords.
+   */
+  private updateLightPosition() {
+    const center = new Vector3();
+    this.boundingBox.getCenter(center);
+
+    // Distance from center to place the light
+    const radius = this.maxDimension * 2 + 1;
+
+    // Spherical to cartesian (Y-up):
+    // x = r * sin(phi) * sin(theta)
+    // y = r * cos(phi)
+    // z = r * sin(phi) * cos(theta)
+    const sinPhi = Math.sin(this.phi);
+    const lx = center.x + radius * sinPhi * Math.sin(this.theta);
+    const ly = center.y + radius * Math.cos(this.phi);
+    const lz = center.z + radius * sinPhi * Math.cos(this.theta);
+
+    this.light.position.set(lx, ly, lz);
+    this.light.target.position.copy(center);
+    this.light.target.updateMatrixWorld();
+
+    // Fit shadow camera frustum to the bounding box
+    const halfSize = this.maxDimension * 1.5;
+    this.light.shadow.camera.left = -halfSize;
+    this.light.shadow.camera.right = halfSize;
+    this.light.shadow.camera.top = halfSize;
+    this.light.shadow.camera.bottom = -halfSize;
+    this.light.shadow.camera.far = radius * 3;
+    this.light.shadow.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * Controls shadow map resolution. softness=0 → 512 (soft), softness=1 → 2048 (crisp).
    */
   setSoftness(softness: number) {
-    const mapSize = Math.round(512 + (1 - softness) * 1536);
+    const mapSize = Math.round(512 + softness * 1536);
     this.light.shadow.mapSize.set(mapSize, mapSize);
     if (this.light.shadow.map) {
       this.light.shadow.map.dispose();
