@@ -30,12 +30,12 @@ jobs:
     - name: Build packages
       run: npm run build
 
-    - name: Publish @google/model-viewer
-      run: npm publish --workspace=@google/model-viewer --access public
+    - name: Publish @solunea/model-viewer
+      run: npm publish --workspace=@solunea/model-viewer --access public
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-    - name: Publish @google/model-viewer-effects
-      run: npm publish --workspace=@google/model-viewer-effects --access public
+    - name: Publish @solunea/model-viewer-effects
+      run: npm publish --workspace=@solunea/model-viewer-effects --access public
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
