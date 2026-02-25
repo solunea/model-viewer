@@ -143,10 +143,8 @@ export class Shadow extends Object3D {
   private phi = DEFAULT_SHADOW_PHI;
   private goalTheta = DEFAULT_SHADOW_THETA;
   private goalPhi = DEFAULT_SHADOW_PHI;
-  private goalSoftness = 0;
   private thetaDamper = new Damper();
   private phiDamper = new Damper();
-  private softnessDamper = new Damper();
   private frustumWidth = 1;
   private nearPlane = 0.5;
   public needsUpdate = false;
@@ -219,42 +217,26 @@ export class Shadow extends Object3D {
   }
 
   /**
-   * Updates the shadow orbit and softness based on damper progression.
-   * Returns true if the shadow changed during this update.
+   * Updates the shadow orbit based on damper progression.
+   * Returns true if the shadow orbit changed during this update.
    */
   update(delta: number): boolean {
-    if (this.theta === this.goalTheta && this.phi === this.goalPhi && this.softness === this.goalSoftness) {
+    if (this.theta === this.goalTheta && this.phi === this.goalPhi) {
       return false;
     }
 
-    let changed = false;
-
-    if (this.theta !== this.goalTheta || this.phi !== this.goalPhi) {
-      // Wrap theta to take the shortest path
-      let dTheta = this.theta - this.goalTheta;
-      if (Math.abs(dTheta) > Math.PI) {
-        this.theta -= Math.sign(dTheta) * 2 * Math.PI;
-      }
-
-      this.theta = this.thetaDamper.update(this.theta, this.goalTheta, delta, Math.PI);
-      this.phi = this.phiDamper.update(this.phi, this.goalPhi, delta, Math.PI / 2);
-
-      this.updateLightPosition();
-      changed = true;
+    // Wrap theta to take the shortest path
+    let dTheta = this.theta - this.goalTheta;
+    if (Math.abs(dTheta) > Math.PI) {
+      this.theta -= Math.sign(dTheta) * 2 * Math.PI;
     }
 
-    if (this.softness !== this.goalSoftness) {
-      this.softness = this.softnessDamper.update(this.softness, this.goalSoftness, delta, 1);
-      this.updatePCSSPatch();
-      this.forceMaterialsRecompile();
-      changed = true;
-    }
+    this.theta = this.thetaDamper.update(this.theta, this.goalTheta, delta, Math.PI);
+    this.phi = this.phiDamper.update(this.phi, this.goalPhi, delta, Math.PI / 2);
 
-    if (changed) {
-      this.needsUpdate = true;
-    }
-    
-    return changed;
+    this.updateLightPosition();
+    this.needsUpdate = true;
+    return true;
   }
 
   /**
@@ -299,14 +281,10 @@ export class Shadow extends Object3D {
    * softness=0 → sharp shadow, softness=1 → very soft penumbra.
    */
   setSoftness(softness: number) {
-    this.goalSoftness = softness;
+    this.softness = softness;
+    this.updatePCSSPatch();
     this.needsUpdate = true;
-  }
 
-  /**
-   * Force materials to recompile so they pick up the updated PCSS shader chunk.
-   */
-  private forceMaterialsRecompile() {
     // Force materials to recompile with the new ShaderChunk by changing defines
     const recompileId = Date.now();
     const forceRecompile = (m: any) => {
@@ -338,6 +316,23 @@ export class Shadow extends Object3D {
     // LIGHT_WORLD_SIZE controls penumbra: 0 = sharp, scales with model size
     const lightSize = this.softness * this.maxDimension * 0.05;
     patchPCSS(lightSize, this.frustumWidth, this.nearPlane);
+
+    // Force materials to recompile with the new ShaderChunk
+    const mat = this.floor.material as ShadowMaterial;
+    mat.needsUpdate = true;
+
+    if (this.parent != null) {
+      this.parent.traverse((object) => {
+        if ((object as Mesh).isMesh) {
+          const meshMat = (object as Mesh).material;
+          if (Array.isArray(meshMat)) {
+            meshMat.forEach(m => m.needsUpdate = true);
+          } else if (meshMat != null) {
+            meshMat.needsUpdate = true;
+          }
+        }
+      });
+    }
   }
 
   /**

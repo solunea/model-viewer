@@ -511,8 +511,10 @@ declare class Shadow extends Object3D {
      * Set the shadow light direction goal using spherical coordinates.
      * theta = azimuth angle (radians, around Y axis, 0 = front)
      * phi = polar angle (radians, from Y axis, 0 = directly above)
+     *
+     * If animate is false, the shadow instantly snaps to the new orbit.
      */
-    setOrbit(theta: number, phi: number): void;
+    setOrbit(theta: number, phi: number, animate?: boolean): void;
     /**
      * Updates the shadow orbit and softness based on damper progression.
      * Returns true if the shadow changed during this update.
@@ -526,7 +528,7 @@ declare class Shadow extends Object3D {
      * Controls PCSS penumbra spread via the light size parameter.
      * softness=0 → sharp shadow, softness=1 → very soft penumbra.
      */
-    setSoftness(softness: number): void;
+    setSoftness(softness: number, animate?: boolean): void;
     /**
      * Force materials to recompile so they pick up the updated PCSS shader chunk.
      */
