@@ -50,8 +50,8 @@ export class Shadow extends Object3D {
     this.light.castShadow = true;
     this.light.shadow.camera.near = 0.1;
     this.light.shadow.camera.far = 100;
-    this.light.shadow.bias = -0.001;
-    this.light.shadow.normalBias = 0.02;
+    this.light.shadow.bias = 0.001;
+    this.light.shadow.normalBias = 0.01;
     this.light.name = 'ShadowLight';
 
     const plane = new PlaneGeometry(1, 1);
