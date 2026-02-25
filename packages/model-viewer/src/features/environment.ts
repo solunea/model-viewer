@@ -89,7 +89,8 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
       }
 
       if (changedProperties.has('shadowOrbit')) {
-        const parts = this.shadowOrbit.trim().split(/\s+/);
+        const orbitStr = this.shadowOrbit || '0deg 0deg';
+        const parts = orbitStr.trim().split(/\s+/);
         const thetaDeg = parts.length > 0 && parts[0] !== 'auto' ? parseFloat(parts[0]) : 0;
         const phiDeg = parts.length > 1 && parts[1] !== 'auto' ? parseFloat(parts[1]) : 0;
         const theta = (isNaN(thetaDeg) ? 0 : thetaDeg) * Math.PI / 180;
