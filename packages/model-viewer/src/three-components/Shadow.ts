@@ -139,7 +139,7 @@ export class Shadow extends Object3D {
     this.light.shadow.camera.right = halfSize;
     this.light.shadow.camera.top = halfSize;
     this.light.shadow.camera.bottom = -halfSize;
-    this.light.shadow.camera.far = radius * 50;
+    this.light.shadow.camera.far = radius * 10;
     this.light.shadow.camera.updateProjectionMatrix();
   }
 
