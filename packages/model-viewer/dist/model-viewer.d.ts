@@ -495,8 +495,10 @@ declare class Shadow extends Object3D {
     private phi;
     private goalTheta;
     private goalPhi;
+    private goalSoftness;
     private thetaDamper;
     private phiDamper;
+    private softnessDamper;
     private frustumWidth;
     private nearPlane;
     needsUpdate: boolean;
@@ -512,8 +514,8 @@ declare class Shadow extends Object3D {
      */
     setOrbit(theta: number, phi: number): void;
     /**
-     * Updates the shadow orbit based on damper progression.
-     * Returns true if the shadow orbit changed during this update.
+     * Updates the shadow orbit and softness based on damper progression.
+     * Returns true if the shadow changed during this update.
      */
     update(delta: number): boolean;
     /**
@@ -525,6 +527,10 @@ declare class Shadow extends Object3D {
      * softness=0 → sharp shadow, softness=1 → very soft penumbra.
      */
     setSoftness(softness: number): void;
+    /**
+     * Force materials to recompile so they pick up the updated PCSS shader chunk.
+     */
+    private forceMaterialsRecompile;
     /**
      * Re-patch the PCSS shader with current light size and frustum dimensions.
      */
