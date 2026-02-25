@@ -15,7 +15,7 @@
  *
  */
 
-import {TextureInfo} from '@google/model-viewer/lib/features/scene-graph/api';
+import {TextureInfo} from '@solunea/model-viewer/lib/features/scene-graph/api';
 import {expect} from 'chai';
 
 import {MaterialPanel} from '../../components/materials_panel/materials_panel.js';

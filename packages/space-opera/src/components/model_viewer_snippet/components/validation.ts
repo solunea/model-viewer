@@ -29,7 +29,7 @@ import {dispatchGltfUrl, getModel, getModelViewer} from '../../model_viewer_prev
 import {resolveExternalResource, validateGltf} from './validation_utils.js';
 
 import type {Report, Message} from './validation_utils';
-import {GLTF} from '@google/model-viewer/lib/three-components/gltf-instance/gltf-defaulted';
+import {GLTF} from '@solunea/model-viewer/lib/three-components/gltf-instance/gltf-defaulted';
 import {reduxStore} from '../../../space_opera_base.js';
 
 @customElement('me-validation-modal')

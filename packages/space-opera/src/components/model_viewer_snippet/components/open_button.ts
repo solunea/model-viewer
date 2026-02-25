@@ -17,7 +17,7 @@
 
 import '@material/mwc-button';
 
-import {ModelViewerElement} from '@google/model-viewer/lib/model-viewer';
+import {ModelViewerElement} from '@solunea/model-viewer/lib/model-viewer';
 import {html, LitElement} from 'lit';
 import {customElement, query, state} from 'lit/decorators.js';
 import {SimpleDropzone} from 'simple-dropzone';

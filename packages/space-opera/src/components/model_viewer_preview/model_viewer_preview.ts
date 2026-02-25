@@ -22,7 +22,7 @@
 
 import '@material/mwc-icon-button';
 
-import {ModelViewerElement} from '@google/model-viewer/lib/model-viewer';
+import {ModelViewerElement} from '@solunea/model-viewer/lib/model-viewer';
 import {html} from 'lit';
 import {customElement, query, state} from 'lit/decorators.js';
 

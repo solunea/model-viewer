@@ -15,7 +15,7 @@
  *
  */
 
-import '@google/model-viewer/lib/model-viewer';
+import '@solunea/model-viewer/lib/model-viewer';
 
 import {html, TemplateResult} from 'lit';
 import {ifDefined} from 'lit/directives/if-defined.js';

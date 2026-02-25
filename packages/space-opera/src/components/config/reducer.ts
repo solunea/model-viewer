@@ -15,7 +15,7 @@
  *
  */
 
-import {SphericalPosition} from '@google/model-viewer/lib/features/controls.js';
+import {SphericalPosition} from '@solunea/model-viewer/lib/features/controls.js';
 
 import {Action, INITIAL_STATE, ModelViewerConfig, State} from '../../types.js';
 import {radToDeg, roundToDigits} from '../utils/reducer_utils.js';

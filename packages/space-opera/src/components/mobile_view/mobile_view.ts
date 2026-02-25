@@ -15,7 +15,7 @@
  *
  */
 
-import {ModelViewerElement} from '@google/model-viewer/lib/model-viewer';
+import {ModelViewerElement} from '@solunea/model-viewer/lib/model-viewer';
 import {html, LitElement} from 'lit';
 import {customElement, query, state} from 'lit/decorators.js';
 import {ifDefined} from 'lit/directives/if-defined.js';
