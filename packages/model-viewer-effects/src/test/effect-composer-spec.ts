@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import {ModelViewerElement} from '@google/model-viewer';
+import {ModelViewerElement} from '@solunea/model-viewer';
 import {expect} from 'chai';
 import {DotScreenEffect, Effect, EffectPass, GridEffect} from 'postprocessing';
 import {Camera} from 'three';

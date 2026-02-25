@@ -1,12 +1,12 @@
 {
-  "name": "@google/model-viewer",
+  "name": "@solunea/model-viewer",
   "version": "4.1.0",
   "description": "Easily display interactive 3D models on the web and in AR!",
-  "repository": "https://github.com/google/model-viewer",
+  "repository": "https://github.com/solunea/model-viewer",
   "bugs": {
-    "url": "https://github.com/google/model-viewer/issues"
+    "url": "https://github.com/solunea/model-viewer/issues"
   },
-  "homepage": "https://github.com/google/model-viewer#readme",
+  "homepage": "https://github.com/solunea/model-viewer#readme",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=6.0.0"

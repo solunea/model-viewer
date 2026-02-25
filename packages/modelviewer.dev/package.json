@@ -25,8 +25,8 @@
     "node": ">=6.0.0"
   },
   "dependencies": {
-    "@google/model-viewer": "^4.1.0",
-    "@google/model-viewer-effects": "^1.4.0",
+    "@solunea/model-viewer": "^4.1.0",
+    "@solunea/model-viewer-effects": "^1.4.0",
     "@types/prismjs": "^1.26.5",
     "focus-visible": "^5.2.1",
     "lit": "^3.2.1",

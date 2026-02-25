@@ -20,7 +20,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/google/model-viewer.git"
+    "url": "git+https://github.com/solunea/model-viewer.git"
   },
   "workspaces": [
     "packages/model-viewer",
@@ -35,9 +35,9 @@
     "node": ">=12.0.0"
   },
   "bugs": {
-    "url": "https://github.com/google/model-viewer/issues"
+    "url": "https://github.com/solunea/model-viewer/issues"
   },
-  "homepage": "https://github.com/google/model-viewer#readme",
+  "homepage": "https://github.com/solunea/model-viewer#readme",
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.26.1",
     "@typescript-eslint/parser": "^8.26.1",
