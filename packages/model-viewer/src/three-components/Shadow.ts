@@ -39,7 +39,7 @@ export class Shadow extends Object3D {
   constructor(scene: ModelScene, softness: number, side: Side) {
     super();
 
-    this.light = new DirectionalLight(0xffffff, 0);
+    this.light = new DirectionalLight(0xffffff, 2);
     this.light.castShadow = true;
     this.light.shadow.camera.near = 0.1;
     this.light.shadow.camera.far = 100;
@@ -54,6 +54,7 @@ export class Shadow extends Object3D {
     this.floor.name = 'ShadowFloor';
 
     this.add(this.light);
+    this.add(this.light.target); // Add light target to scene graph
     this.add(this.floor);
 
     scene.target.add(this);
