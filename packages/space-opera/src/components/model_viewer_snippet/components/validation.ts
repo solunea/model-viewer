@@ -184,7 +184,7 @@ export class Validation extends ConnectedLitElement {
         const io = new WebIO().registerExtensions(KHRONOS_EXTENSIONS);
         const doc = await io.read(gltfUrl);
         await doc.transform(metalRough());
-        const glb = await io.writeBinary(doc);
+        const glb = await io.writeBinary(doc) as Uint8Array;
         const blob = new Blob([glb], {type: 'application/octet-stream'});
         const fileURL = URL.createObjectURL(blob);
         this.converted = true;
