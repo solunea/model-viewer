@@ -479,7 +479,8 @@ type Side = 'back' | 'bottom';
  * Replaces the broken contact-shadow approach for Three.js r183+.
  *
  * shadow-intensity controls opacity of the shadow plane.
- * shadow-softness controls shadow map resolution (0=harsh/512, 1=soft/2048).
+ * shadow-softness controls shadow map resolution (0=soft/512, 1=crisp/2048).
+ * shadow-orbit controls the light direction as spherical coords (theta, phi).
  */
 declare class Shadow extends Object3D {
     private light;
@@ -489,6 +490,8 @@ declare class Shadow extends Object3D {
     private size;
     private maxDimension;
     private side;
+    private theta;
+    private phi;
     needsUpdate: boolean;
     constructor(scene: ModelScene, softness: number, side: Side);
     /**
@@ -496,7 +499,17 @@ declare class Shadow extends Object3D {
      */
     setScene(scene: ModelScene, softness: number, side: Side): void;
     /**
-     * Controls shadow map resolution. softness=0 → 2048 (crisp), softness=1 → 512 (soft).
+     * Set the shadow light direction using spherical coordinates.
+     * theta = azimuth angle (radians, around Y axis, 0 = front)
+     * phi = polar angle (radians, from Y axis, 0 = directly above)
+     */
+    setOrbit(theta: number, phi: number): void;
+    /**
+     * Position the DirectionalLight using current theta/phi spherical coords.
+     */
+    private updateLightPosition;
+    /**
+     * Controls shadow map resolution. softness=0 → 512 (soft), softness=1 → 2048 (crisp).
      */
     setSoftness(softness: number): void;
     /**
@@ -714,6 +727,11 @@ declare class ModelScene extends Scene$1 {
      * be changed frequently. Softer shadows are cheaper to render.
      */
     setShadowSoftness(softness: number): void;
+    /**
+     * Sets the shadow light direction using spherical coordinates (radians).
+     * theta = azimuth angle around Y axis, phi = polar angle from Y axis.
+     */
+    setShadowOrbit(theta: number, phi: number): void;
     /**
      * Shift the floor vertically from the bottom of the model's bounding box
      * by offset (should generally be negative).
@@ -1560,6 +1578,7 @@ declare interface EnvironmentInterface {
     skyboxHeight: string;
     shadowIntensity: number;
     shadowSoftness: number;
+    shadowOrbit: string;
     exposure: number;
     hasBakedShadow(): boolean;
 }
