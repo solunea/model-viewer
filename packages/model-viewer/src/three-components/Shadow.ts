@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import {Box3, DirectionalLight, Mesh, Object3D, PCFSoftShadowMap, PlaneGeometry, Scene, ShadowMaterial, Vector3, WebGLRenderer} from 'three';
+import {BasicShadowMap, Box3, DirectionalLight, Mesh, Object3D, PlaneGeometry, Scene, ShaderChunk, ShadowMaterial, Vector3, WebGLRenderer} from 'three';
 
 import {ModelScene} from './ModelScene.js';
 
@@ -23,24 +23,125 @@ export type Side = 'back'|'bottom';
 const DEFAULT_SHADOW_THETA = 0;
 const DEFAULT_SHADOW_PHI = 0;
 
+// ─── PCSS shader injection ──────────────────────────────────────────
+// Percentage Closer Soft Shadows: shadows get softer the farther the
+// receiver is from the blocker, like real-world contact shadows.
+// 17 Poisson samples keeps it fast on mobile / integrated GPUs.
+// ─────────────────────────────────────────────────────────────────────
+const originalShadowChunk = ShaderChunk.shadowmap_pars_fragment;
+
+function patchPCSS(lightSize: number, frustumWidth: number, nearPlane: number) {
+  const pcssShader = `
+    #define LIGHT_WORLD_SIZE ${lightSize.toFixed(6)}
+    #define LIGHT_FRUSTUM_WIDTH ${frustumWidth.toFixed(6)}
+    #define LIGHT_SIZE_UV (LIGHT_WORLD_SIZE / LIGHT_FRUSTUM_WIDTH)
+    #define NEAR_PLANE ${nearPlane.toFixed(6)}
+
+    #define NUM_SAMPLES 17
+    #define NUM_RINGS 11
+    #define BLOCKER_SEARCH_NUM_SAMPLES NUM_SAMPLES
+
+    vec2 poissonDisk[NUM_SAMPLES];
+
+    void initPoissonSamples( const in vec2 randomSeed ) {
+      float ANGLE_STEP = PI2 * float( NUM_RINGS ) / float( NUM_SAMPLES );
+      float INV_NUM_SAMPLES = 1.0 / float( NUM_SAMPLES );
+      float angle = rand( randomSeed ) * PI2;
+      float radius = INV_NUM_SAMPLES;
+      float radiusStep = radius;
+      for( int i = 0; i < NUM_SAMPLES; i ++ ) {
+        poissonDisk[i] = vec2( cos( angle ), sin( angle ) ) * pow( radius, 0.75 );
+        radius += radiusStep;
+        angle += ANGLE_STEP;
+      }
+    }
+
+    float penumbraSize( const in float zReceiver, const in float zBlocker ) {
+      return (zReceiver - zBlocker) / zBlocker;
+    }
+
+    float findBlocker( sampler2D shadowMap, const in vec2 uv, const in float zReceiver ) {
+      float searchRadius = LIGHT_SIZE_UV * ( zReceiver - NEAR_PLANE ) / zReceiver;
+      float blockerDepthSum = 0.0;
+      int numBlockers = 0;
+      for( int i = 0; i < BLOCKER_SEARCH_NUM_SAMPLES; i++ ) {
+        float shadowMapDepth = texture2D(shadowMap, uv + poissonDisk[i] * searchRadius).r;
+        if ( shadowMapDepth < zReceiver ) {
+          blockerDepthSum += shadowMapDepth;
+          numBlockers ++;
+        }
+      }
+      if( numBlockers == 0 ) return -1.0;
+      return blockerDepthSum / float( numBlockers );
+    }
+
+    float PCF_Filter(sampler2D shadowMap, vec2 uv, float zReceiver, float filterRadius ) {
+      float sum = 0.0;
+      float depth;
+      #pragma unroll_loop_start
+      for( int i = 0; i < 17; i ++ ) {
+        depth = texture2D( shadowMap, uv + poissonDisk[ i ] * filterRadius ).r;
+        if( zReceiver <= depth ) sum += 1.0;
+      }
+      #pragma unroll_loop_end
+      #pragma unroll_loop_start
+      for( int i = 0; i < 17; i ++ ) {
+        depth = texture2D( shadowMap, uv + -poissonDisk[ i ].yx * filterRadius ).r;
+        if( zReceiver <= depth ) sum += 1.0;
+      }
+      #pragma unroll_loop_end
+      return sum / ( 2.0 * float( 17 ) );
+    }
+
+    float PCSS ( sampler2D shadowMap, vec4 coords ) {
+      vec2 uv = coords.xy;
+      float zReceiver = coords.z;
+      initPoissonSamples( uv );
+      float avgBlockerDepth = findBlocker( shadowMap, uv, zReceiver );
+      if( avgBlockerDepth == -1.0 ) return 1.0;
+      float penumbraRatio = penumbraSize( zReceiver, avgBlockerDepth );
+      float filterRadius = penumbraRatio * LIGHT_SIZE_UV * NEAR_PLANE / zReceiver;
+      return PCF_Filter( shadowMap, uv, zReceiver, filterRadius );
+    }
+  `;
+
+  const pcssGetShadow = `return PCSS( shadowMap, shadowCoord );`;
+
+  let shader = originalShadowChunk;
+
+  shader = shader.replace(
+      '#ifdef USE_SHADOWMAP',
+      '#ifdef USE_SHADOWMAP' + pcssShader);
+
+  shader = shader.replace(
+      '\t\t\tif ( frustumTest ) {\n\t\t\t\tfloat depth = texture2D( shadowMap, shadowCoord.xy ).r;',
+      '\t\t\tif ( frustumTest ) {\n' + pcssGetShadow +
+          '\n\t\t\t\tfloat depth = texture2D( shadowMap, shadowCoord.xy ).r;');
+
+  ShaderChunk.shadowmap_pars_fragment = shader;
+}
+
 /**
- * Real Three.js shadow implementation using DirectionalLight + ShadowMaterial.
- * Replaces the broken contact-shadow approach for Three.js r183+.
+ * Real Three.js shadow implementation using DirectionalLight + ShadowMaterial
+ * with PCSS (Percentage Closer Soft Shadows) for distance-dependent penumbra.
  *
  * shadow-intensity controls opacity of the shadow plane.
- * shadow-softness controls shadow map resolution (0=soft/512, 1=crisp/2048).
+ * shadow-softness controls PCSS light size (penumbra spread).
  * shadow-orbit controls the light direction as spherical coords (theta, phi).
  */
 export class Shadow extends Object3D {
   private light: DirectionalLight;
   private floor: Mesh;
   private intensity = 0;
+  private softness = 0;
   private boundingBox = new Box3();
   private size = new Vector3();
   private maxDimension = 0;
   private side: Side = 'bottom';
   private theta = DEFAULT_SHADOW_THETA;
   private phi = DEFAULT_SHADOW_PHI;
+  private frustumWidth = 1;
+  private nearPlane = 0.5;
   public needsUpdate = false;
 
   constructor(scene: ModelScene, softness: number, side: Side) {
@@ -48,10 +149,11 @@ export class Shadow extends Object3D {
 
     this.light = new DirectionalLight(0xffffff, 2);
     this.light.castShadow = true;
-    this.light.shadow.camera.near = 0.1;
+    this.light.shadow.camera.near = 0.5;
     this.light.shadow.camera.far = 100;
     this.light.shadow.bias = 0.001;
     this.light.shadow.normalBias = 0.01;
+    this.light.shadow.mapSize.set(1024, 1024);
     this.light.name = 'ShadowLight';
 
     const plane = new PlaneGeometry(1, 1);
@@ -135,25 +237,35 @@ export class Shadow extends Object3D {
 
     // Fit shadow camera frustum to the bounding box
     const halfSize = this.maxDimension * 25;
+    this.frustumWidth = halfSize * 2;
+    this.nearPlane = this.light.shadow.camera.near;
     this.light.shadow.camera.left = -halfSize;
     this.light.shadow.camera.right = halfSize;
     this.light.shadow.camera.top = halfSize;
     this.light.shadow.camera.bottom = -halfSize;
     this.light.shadow.camera.far = radius * 10;
     this.light.shadow.camera.updateProjectionMatrix();
+
+    this.updatePCSSPatch();
   }
 
   /**
-   * Controls shadow map resolution. softness=0 → 512 (soft), softness=1 → 2048 (crisp).
+   * Controls PCSS penumbra spread via the light size parameter.
+   * softness=0 → sharp shadow, softness=1 → very soft penumbra.
    */
   setSoftness(softness: number) {
-    const mapSize = Math.round(512 + softness * 1536);
-    this.light.shadow.mapSize.set(mapSize, mapSize);
-    if (this.light.shadow.map) {
-      this.light.shadow.map.dispose();
-      (this.light.shadow as any).map = null;
-    }
+    this.softness = softness;
+    this.updatePCSSPatch();
     this.needsUpdate = true;
+  }
+
+  /**
+   * Re-patch the PCSS shader with current light size and frustum dimensions.
+   */
+  private updatePCSSPatch() {
+    // LIGHT_WORLD_SIZE controls penumbra: 0 = sharp, scales with model size
+    const lightSize = this.softness * this.maxDimension * 0.5;
+    patchPCSS(lightSize, this.frustumWidth, this.nearPlane);
   }
 
   /**
@@ -199,7 +311,8 @@ export class Shadow extends Object3D {
   render(renderer: WebGLRenderer, scene: Scene) {
     if (!renderer.shadowMap.enabled) {
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = PCFSoftShadowMap;
+      // PCSS requires BasicShadowMap to read raw depth values
+      renderer.shadowMap.type = BasicShadowMap;
     }
 
     scene.traverse((object) => {
@@ -212,6 +325,8 @@ export class Shadow extends Object3D {
   }
 
   dispose() {
+    // Restore original shader chunk on dispose
+    ShaderChunk.shadowmap_pars_fragment = originalShadowChunk;
     this.light.shadow.map?.dispose();
     (this.floor.material as ShadowMaterial).dispose();
     this.floor.geometry.dispose();

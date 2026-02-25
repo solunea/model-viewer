@@ -475,23 +475,26 @@ declare class Hotspot extends CSS2DObject {
 
 type Side = 'back' | 'bottom';
 /**
- * Real Three.js shadow implementation using DirectionalLight + ShadowMaterial.
- * Replaces the broken contact-shadow approach for Three.js r183+.
+ * Real Three.js shadow implementation using DirectionalLight + ShadowMaterial
+ * with PCSS (Percentage Closer Soft Shadows) for distance-dependent penumbra.
  *
  * shadow-intensity controls opacity of the shadow plane.
- * shadow-softness controls shadow map resolution (0=soft/512, 1=crisp/2048).
+ * shadow-softness controls PCSS light size (penumbra spread).
  * shadow-orbit controls the light direction as spherical coords (theta, phi).
  */
 declare class Shadow extends Object3D {
     private light;
     private floor;
     private intensity;
+    private softness;
     private boundingBox;
     private size;
     private maxDimension;
     private side;
     private theta;
     private phi;
+    private frustumWidth;
+    private nearPlane;
     needsUpdate: boolean;
     constructor(scene: ModelScene, softness: number, side: Side);
     /**
@@ -509,9 +512,14 @@ declare class Shadow extends Object3D {
      */
     private updateLightPosition;
     /**
-     * Controls shadow map resolution. softness=0 → 512 (soft), softness=1 → 2048 (crisp).
+     * Controls PCSS penumbra spread via the light size parameter.
+     * softness=0 → sharp shadow, softness=1 → very soft penumbra.
      */
     setSoftness(softness: number): void;
+    /**
+     * Re-patch the PCSS shader with current light size and frustum dimensions.
+     */
+    private updatePCSSPatch;
     /**
      * Set the shadow's intensity (0 to 1) — controls floor opacity.
      */
