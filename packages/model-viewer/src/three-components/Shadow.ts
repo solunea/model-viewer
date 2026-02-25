@@ -235,8 +235,8 @@ export class Shadow extends Object3D {
     this.light.target.position.copy(center);
     this.light.target.updateMatrixWorld();
 
-    // Fit shadow camera frustum to the bounding box
-    const halfSize = this.maxDimension * 25;
+    // Fit shadow camera frustum to the bounding box (tight = sharper PCSS)
+    const halfSize = this.maxDimension * 3;
     this.frustumWidth = halfSize * 2;
     this.nearPlane = this.light.shadow.camera.near;
     this.light.shadow.camera.left = -halfSize;
@@ -264,7 +264,7 @@ export class Shadow extends Object3D {
    */
   private updatePCSSPatch() {
     // LIGHT_WORLD_SIZE controls penumbra: 0 = sharp, scales with model size
-    const lightSize = this.softness * this.maxDimension * 0.5;
+    const lightSize = this.softness * this.maxDimension * 0.05;
     patchPCSS(lightSize, this.frustumWidth, this.nearPlane);
   }
 
