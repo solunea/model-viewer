@@ -257,6 +257,29 @@ export class Shadow extends Object3D {
     this.softness = softness;
     this.updatePCSSPatch();
     this.needsUpdate = true;
+
+    // Force materials to recompile with the new ShaderChunk by changing defines
+    const recompileId = Date.now();
+    const forceRecompile = (m: any) => {
+      m.defines = m.defines || {};
+      m.defines.PCSS_VERSION = recompileId;
+      m.needsUpdate = true;
+    };
+
+    forceRecompile(this.floor.material);
+
+    if (this.parent != null) {
+      this.parent.traverse((object) => {
+        if ((object as Mesh).isMesh) {
+          const meshMat = (object as Mesh).material;
+          if (Array.isArray(meshMat)) {
+            meshMat.forEach(forceRecompile);
+          } else if (meshMat != null) {
+            forceRecompile(meshMat);
+          }
+        }
+      });
+    }
   }
 
   /**
