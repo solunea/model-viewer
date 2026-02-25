@@ -541,6 +541,14 @@ export default class ModelViewerElementBase extends ReactiveElement {
 
   [$tick](time: number, delta: number) {
     this[$scene].effectRenderer?.beforeRender(time, delta);
+    
+    // Update shadow orbit transition if applicable
+    const shadow = this[$scene].shadow;
+    if (shadow != null) {
+      if (shadow.update(delta)) {
+        this[$needsRender]();
+      }
+    }
   }
 
   [$markLoaded]() {

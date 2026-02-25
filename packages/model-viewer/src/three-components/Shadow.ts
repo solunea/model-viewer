@@ -16,6 +16,7 @@
 import {BasicShadowMap, Box3, DirectionalLight, Mesh, Object3D, PlaneGeometry, Scene, ShaderChunk, ShadowMaterial, Vector3, WebGLRenderer} from 'three';
 
 import {ModelScene} from './ModelScene.js';
+import {Damper} from './Damper.js';
 
 export type Side = 'back'|'bottom';
 
@@ -140,6 +141,10 @@ export class Shadow extends Object3D {
   private side: Side = 'bottom';
   private theta = DEFAULT_SHADOW_THETA;
   private phi = DEFAULT_SHADOW_PHI;
+  private goalTheta = DEFAULT_SHADOW_THETA;
+  private goalPhi = DEFAULT_SHADOW_PHI;
+  private thetaDamper = new Damper();
+  private phiDamper = new Damper();
   private frustumWidth = 1;
   private nearPlane = 0.5;
   public needsUpdate = false;
@@ -201,15 +206,37 @@ export class Shadow extends Object3D {
   }
 
   /**
-   * Set the shadow light direction using spherical coordinates.
+   * Set the shadow light direction goal using spherical coordinates.
    * theta = azimuth angle (radians, around Y axis, 0 = front)
    * phi = polar angle (radians, from Y axis, 0 = directly above)
    */
   setOrbit(theta: number, phi: number) {
-    this.theta = theta;
-    this.phi = phi;
+    this.goalTheta = theta;
+    this.goalPhi = phi;
+    this.needsUpdate = true;
+  }
+
+  /**
+   * Updates the shadow orbit based on damper progression.
+   * Returns true if the shadow orbit changed during this update.
+   */
+  update(delta: number): boolean {
+    if (this.theta === this.goalTheta && this.phi === this.goalPhi) {
+      return false;
+    }
+
+    // Wrap theta to take the shortest path
+    let dTheta = this.theta - this.goalTheta;
+    if (Math.abs(dTheta) > Math.PI) {
+      this.theta -= Math.sign(dTheta) * 2 * Math.PI;
+    }
+
+    this.theta = this.thetaDamper.update(this.theta, this.goalTheta, delta, Math.PI);
+    this.phi = this.phiDamper.update(this.phi, this.goalPhi, delta, Math.PI / 2);
+
     this.updateLightPosition();
     this.needsUpdate = true;
+    return true;
   }
 
   /**

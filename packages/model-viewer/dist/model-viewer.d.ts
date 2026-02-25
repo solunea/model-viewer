@@ -493,6 +493,10 @@ declare class Shadow extends Object3D {
     private side;
     private theta;
     private phi;
+    private goalTheta;
+    private goalPhi;
+    private thetaDamper;
+    private phiDamper;
     private frustumWidth;
     private nearPlane;
     needsUpdate: boolean;
@@ -502,11 +506,16 @@ declare class Shadow extends Object3D {
      */
     setScene(scene: ModelScene, softness: number, side: Side): void;
     /**
-     * Set the shadow light direction using spherical coordinates.
+     * Set the shadow light direction goal using spherical coordinates.
      * theta = azimuth angle (radians, around Y axis, 0 = front)
      * phi = polar angle (radians, from Y axis, 0 = directly above)
      */
     setOrbit(theta: number, phi: number): void;
+    /**
+     * Updates the shadow orbit based on damper progression.
+     * Returns true if the shadow orbit changed during this update.
+     */
+    update(delta: number): boolean;
     /**
      * Position the DirectionalLight using current theta/phi spherical coords.
      */
