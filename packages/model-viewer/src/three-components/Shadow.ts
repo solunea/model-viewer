@@ -101,11 +101,20 @@ export class Shadow extends Object3D {
 
     scene.target.add(this);
 
-    // like MeshDepthMaterial, but goes from black to transparent
+    // like MeshDepthMaterial, but goes from black to transparent.
+    // Three.js r183 added USE_REVERSED_DEPTH_BUFFER which inverts fragCoordZ
+    // range. We replace only the gl_FragColor line with an inline GLSL
+    // conditional so the alpha is correct in both depth buffer modes.
     this.depthMaterial.onBeforeCompile = function(shader) {
       shader.fragmentShader = shader.fragmentShader.replace(
           'gl_FragColor = vec4( vec3( 1.0 - fragCoordZ ), opacity );',
-          'gl_FragColor = vec4( vec3( 0.0 ), ( 1.0 - fragCoordZ ) * opacity );');
+          [
+            '#ifdef USE_REVERSED_DEPTH_BUFFER',
+            '\tgl_FragColor = vec4( vec3( 0.0 ), ( 1.0 - fragCoordZ ) * opacity );',
+            '#else',
+            '\tgl_FragColor = vec4( vec3( 0.0 ), fragCoordZ * opacity );',
+            '#endif',
+          ].join('\n'));
     };
     // Render both sides, back sides face the light source and
     // front sides supply depth information for soft shadows
