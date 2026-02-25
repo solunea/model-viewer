@@ -574,14 +574,14 @@ export class ARRenderer extends EventDispatcher<
       // Ensure screen space mode is maintained
       this.placementBox!.setScreenSpaceMode(this.xrMode === XRMode.SCREEN_SPACE);
     }
-    if (this.xrMode !== XRMode.SCREEN_SPACE) {
+    if (this.isPresenting && this.xrMode !== XRMode.SCREEN_SPACE && this.presentedScene != null) {
         if (this.menuPanel) {
           this.menuPanel.dispose(); 
           this.menuPanel = null;
         }
         this.menuPanel = new XRMenuPanel();
-        this.presentedScene!.add(this.menuPanel);
-        this.menuPanel.updatePosition(this.presentedScene!.getCamera(), this.placementBox!);
+        this.presentedScene.add(this.menuPanel);
+        this.menuPanel.updatePosition(this.presentedScene.getCamera(), this.placementBox!);
       }
 
   };
