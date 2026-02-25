@@ -89,7 +89,7 @@ export class ModelScene extends Scene {
   public xrCamera: Camera|null = null;
 
   public url: string|null = null;
-  public pivot = new Object3D();
+  public pivotNode = new Object3D();
   public target = new Object3D();
   public animationNames: Array<string> = [];
   public boundingBox = new Box3();
@@ -136,10 +136,10 @@ export class ModelScene extends Scene {
     this.camera = new PerspectiveCamera(45, 1, 0.1, 100);
     this.camera.name = 'MainCamera';
 
-    this.add(this.pivot);
-    this.pivot.name = 'Pivot';
+    this.add(this.pivotNode);
+    this.pivotNode.name = 'Pivot';
 
-    this.pivot.add(this.target);
+    this.pivotNode.add(this.target);
 
     this.setSize(width, height);
 
@@ -661,13 +661,13 @@ export class ModelScene extends Scene {
    * center.
    */
   set yaw(radiansY: number) {
-    this.pivot.rotation.y = radiansY;
+    this.pivotNode.rotation.y = radiansY;
     this.groundedSkybox.rotation.y = -radiansY;
     this.queueRender();
   }
 
   get yaw(): number {
-    return this.pivot.rotation.y;
+    return this.pivotNode.rotation.y;
   }
 
   set animationTime(value: number) {

@@ -437,7 +437,7 @@ export class ARRenderer extends EventDispatcher<
     const intersection = this.placementBox!.controllerIntersection(scene,
       controller);
     if (intersection!=null){
-      const bbox = new Box3().setFromObject(scene.pivot);
+      const bbox = new Box3().setFromObject(scene.pivotNode);
       const footprintY = bbox.min.y + FOOTPRINT__INTERSECT_THRESHOLD; // Small threshold above base
 
       // Check if the ray intersection is near the footprint
@@ -447,11 +447,11 @@ export class ARRenderer extends EventDispatcher<
           this.selectedXRController.userData.line.visible = false;
           if (scene.canScale && this.isWorldSpaceReady()) {
             this.isTwoHandInteraction = true;
-            this.firstRatio = this.controllerSeparation() / scene.pivot.scale.x;
+            this.firstRatio = this.controllerSeparation() / scene.pivotNode.scale.x;
             this.scaleLine.visible = true;
           }
         } else {
-          controller.attach(scene.pivot);
+          controller.attach(scene.pivotNode);
         }
         this.selectedXRController = controller;
         scene.setShadowIntensity(0.01);
@@ -465,7 +465,7 @@ export class ARRenderer extends EventDispatcher<
         if (this.xrController1?.userData.isSelected && this.xrController2?.userData.isSelected) {
           if (scene.canScale && this.isWorldSpaceReady()) {
             this.isTwoHandInteraction = true;
-            this.firstRatio = this.controllerSeparation() / scene.pivot.scale.x;
+            this.firstRatio = this.controllerSeparation() / scene.pivotNode.scale.x;
             this.scaleLine.visible = true;
           }
         } else {
@@ -499,16 +499,16 @@ export class ARRenderer extends EventDispatcher<
     }
     const scene = this.presentedScene!;
     // drop on floor
-    scene.attach(scene.pivot);
+    scene.attach(scene.pivotNode);
     this.selectedXRController = null;
     this.goalYaw = Math.atan2(
-        scene.pivot.matrix.elements[8], scene.pivot.matrix.elements[10]);
-    this.goalPosition.x = scene.pivot.position.x;
-    this.goalPosition.z = scene.pivot.position.z;
+        scene.pivotNode.matrix.elements[8], scene.pivotNode.matrix.elements[10]);
+    this.goalPosition.x = scene.pivotNode.position.x;
+    this.goalPosition.z = scene.pivotNode.position.z;
     
     // For world-space mode after initial placement, preserve Y position
     if (this.isWorldSpaceReady()) {
-      this.goalPosition.y = scene.pivot.position.y;
+      this.goalPosition.y = scene.pivotNode.position.y;
     }
 
     const menuPanel = this.menuPanel;
@@ -618,10 +618,10 @@ export class ARRenderer extends EventDispatcher<
         this.menuPanel = null;
       }
 
-      scene.add(scene.pivot);
-      scene.pivot.quaternion.set(0, 0, 0, 1);
-      scene.pivot.position.set(0, 0, 0);
-      scene.pivot.scale.set(1, 1, 1);
+      scene.add(scene.pivotNode);
+      scene.pivotNode.quaternion.set(0, 0, 0, 1);
+      scene.pivotNode.position.set(0, 0, 0);
+      scene.pivotNode.scale.set(1, 1, 1);
       scene.setShadowOffset(0);
       const yaw = this.turntableRotation;
       if (yaw != null) {
@@ -739,8 +739,8 @@ export class ARRenderer extends EventDispatcher<
 
   private placeInitially() {
     const scene = this.presentedScene!;
-    const {pivot, element} = scene;
-    const {position} = pivot;
+    const {pivotNode, element} = scene;
+    const {position} = pivotNode;
     const xrCamera = scene.getCamera();
 
     const {width, height} = this.overlay!.getBoundingClientRect();
@@ -770,7 +770,7 @@ export class ARRenderer extends EventDispatcher<
       
       // Set initial position and scale immediately for world-space
       position.copy(optimalPosition);
-      pivot.scale.set(optimalScale, optimalScale, optimalScale);
+      pivotNode.scale.set(optimalScale, optimalScale, optimalScale);
       
       // Mark that initial placement is done
       this.worldSpaceInitialPlacementDone = true;
@@ -909,7 +909,7 @@ export class ARRenderer extends EventDispatcher<
       const {separation, angle} = this.fingerPolar(fingers);
       this.lastAngle = angle; // Initialize lastAngle, do not update goalYaw
       if (this.firstRatio === 0) {
-        this.firstRatio = separation / scene.pivot.scale.x;
+        this.firstRatio = separation / scene.pivotNode.scale.x;
       }
       if (scene.canScale) {
         this.setScale(separation);
@@ -965,7 +965,7 @@ export class ARRenderer extends EventDispatcher<
     }
     const fingers = frame.getHitTestResultsForTransientInput(hitSource);
     const scene = this.presentedScene!;
-    const scale = scene.pivot.scale.x;
+    const scale = scene.pivotNode.scale.x;
 
     // Robust two-finger gesture handling
     if (fingers.length === 2) {
@@ -1075,19 +1075,19 @@ export class ARRenderer extends EventDispatcher<
       this.scaleLine.scale.z = -dist;
       this.scaleLine.lookAt(this.xrController2.position);
     }
-    const oldScale = scene.pivot.scale.x;
+    const oldScale = scene.pivotNode.scale.x;
     if (this.goalScale !== oldScale) {
       const newScale = this.scaleDamper.update(oldScale, this.goalScale, delta, 1);
-      scene.pivot.scale.set(newScale, newScale, newScale);
+      scene.pivotNode.scale.set(newScale, newScale, newScale);
     }
   }
 
   private updatePivotPosition(scene: ModelScene, delta: number) {
-    const {pivot} = scene;
+    const {pivotNode} = scene;
     const box = this.placementBox!;
     const boundingRadius = scene.boundingSphere.radius;
     const goal = this.goalPosition;
-    const position = pivot.position;
+    const position = pivotNode.position;
   
     let source = ChangeSource.NONE;
     if (!goal.equals(position)) {
@@ -1101,7 +1101,7 @@ export class ARRenderer extends EventDispatcher<
       if (this.xrMode === XRMode.SCREEN_SPACE && !this.isTranslating) {
         const offset = goal.y - y;
         if (this.placementComplete && this.placeOnWall === false) {
-          box.offsetHeight = offset / scene.pivot.scale.x;
+          box.offsetHeight = offset / scene.pivotNode.scale.x;
           scene.setShadowOffset(offset);
         } else if (offset === 0) {
           this.placementComplete = true;
@@ -1121,9 +1121,9 @@ export class ARRenderer extends EventDispatcher<
     }
     
     // Handle automatic scaling for world-space mode only during initial placement
-    if (this.xrMode === XRMode.WORLD_SPACE && !this.worldSpaceInitialPlacementDone && this.goalScale !== pivot.scale.x) {
-      const newScale = this.scaleDamper.update(pivot.scale.x, this.goalScale, delta, 1);
-      pivot.scale.set(newScale, newScale, newScale);
+    if (this.xrMode === XRMode.WORLD_SPACE && !this.worldSpaceInitialPlacementDone && this.goalScale !== pivotNode.scale.x) {
+      const newScale = this.scaleDamper.update(pivotNode.scale.x, this.goalScale, delta, 1);
+      pivotNode.scale.set(newScale, newScale, newScale);
     }
     
     scene.updateTarget(delta);
@@ -1135,9 +1135,9 @@ export class ARRenderer extends EventDispatcher<
   private updateYaw(scene: ModelScene, delta: number) {
     // yaw must be updated last, since this also updates the shadow position.
     quaternion.setFromAxisAngle(vector3.set(0, 1, 0), this.goalYaw);
-    const angle = scene.pivot.quaternion.angleTo(quaternion);
+    const angle = scene.pivotNode.quaternion.angleTo(quaternion);
     const angleStep = angle - this.yawDamper.update(angle, 0, delta, Math.PI);
-    scene.pivot.quaternion.rotateTowards(quaternion, angleStep);
+    scene.pivotNode.quaternion.rotateTowards(quaternion, angleStep);
   }
 
   private updateMenuPanel(scene: ModelScene, box: PlacementBox, delta: number) {
@@ -1149,7 +1149,7 @@ export class ARRenderer extends EventDispatcher<
 
   private applyXRInputToScene(delta: number) {
     const scene = this.presentedScene!;
-    const pivot = scene.pivot;
+    const pivot = scene.pivotNode;
     const box = this.placementBox!;
 
     this.updatePlacementBoxOpacity(box, delta);
