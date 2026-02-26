@@ -474,8 +474,15 @@ declare class Hotspot extends CSS2DObject {
 }
 
 type Side = 'back' | 'bottom';
+/**
+ * Dual-mode shadow:
+ * - 'basic' (default): Orthographic camera + depth + gaussian blur. Very fast.
+ * - 'pcss': DirectionalLight + PCSS shader. Higher quality, supports shadow-orbit.
+ *
+ * Mode is auto-selected: basic when orbit is (0,0), pcss when orbit is non-zero.
+ */
 declare class Shadow extends Object3D {
-    private light;
+    private mode;
     private floor;
     private intensity;
     private softness;
@@ -489,61 +496,42 @@ declare class Shadow extends Object3D {
     private goalPhi;
     private thetaDamper;
     private phiDamper;
+    needsUpdate: boolean;
+    private basicCamera;
+    private renderTarget;
+    private renderTargetBlur;
+    private depthMaterial;
+    private horizontalBlurMaterial;
+    private verticalBlurMaterial;
+    private blurPlane;
+    private light;
     private frustumWidth;
     private nearPlane;
     private castShadowSet;
-    needsUpdate: boolean;
     constructor(scene: ModelScene, softness: number, side: Side);
-    /**
-     * Update shadow geometry and light frustum to fit the scene's bounding box.
-     */
+    private initBasicMode;
+    private initPCSSMode;
+    private disposeMode;
     setScene(scene: ModelScene, softness: number, side: Side): void;
-    /**
-     * Set the shadow light direction goal using spherical coordinates.
-     * theta = azimuth angle (radians, around Y axis, 0 = front)
-     * phi = polar angle (radians, from Y axis, 0 = directly above)
-     */
     setOrbit(theta: number, phi: number): void;
-    /**
-     * Updates the shadow orbit based on damper progression.
-     * Returns true if the shadow orbit changed during this update.
-     */
     update(delta: number): boolean;
-    /**
-     * Position the DirectionalLight using current theta/phi spherical coords.
-     */
-    private updateLightPosition;
-    /**
-     * Controls PCSS penumbra spread via the light size parameter.
-     * softness=0 → sharp shadow, softness=1 → very soft penumbra.
-     */
     setSoftness(softness: number): void;
-    /**
-     * Re-patch the PCSS shader with current light size and frustum dimensions.
-     * Only triggers material recompilation when the shader actually changed.
-     */
-    private updatePCSSPatch;
-    /**
-     * Set the shadow's intensity (0 to 1) — controls floor opacity.
-     */
     setIntensity(intensity: number): void;
     getIntensity(): number;
-    /**
-     * Shift the floor vertically. Positive is up.
-     */
     setOffset(offset: number): void;
     gap(): number;
-    /**
-     * Enable shadow rendering on the WebGLRenderer and set castShadow on
-     * all meshes. The scene traversal is done only once for performance.
-     */
     render(renderer: WebGLRenderer, scene: Scene$1): void;
-    /**
-     * Reset castShadow flag so next render will re-traverse.
-     * Call when model geometry changes.
-     */
     invalidateCastShadow(): void;
     dispose(): void;
+    private setupBasicScene;
+    private updateBasicSoftness;
+    private setMapSize;
+    private renderBasic;
+    private blurShadow;
+    private setupPCSSScene;
+    private updatePCSSLightPosition;
+    private updatePCSSPatch;
+    private renderPCSS;
 }
 
 interface ModelSceneConfig {
