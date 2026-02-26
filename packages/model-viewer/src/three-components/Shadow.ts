@@ -208,15 +208,12 @@ export class Shadow extends Object3D {
     this.mode = 'basic';
     restoreShadowChunk();
 
-    // Standard blob-shadow pattern: camera at origin facing -Z.
-    // The Shadow Object3D is rotated so that its local -Z = world -Y (down),
-    // making the camera look straight down in world space.
     this.basicCamera = new OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0, 1);
+    this.basicCamera.rotation.x = Math.PI / 2;
     this.basicCamera.updateProjectionMatrix();
     this.add(this.basicCamera);
 
     const plane = new PlaneGeometry();
-    // floor sits at z=0.5 in camera local space (midpoint between near=0 and far=1)
     const floorMat = new MeshBasicMaterial({
       opacity: 1,
       transparent: true,
@@ -225,12 +222,11 @@ export class Shadow extends Object3D {
     this.floor = new Mesh(plane, floorMat);
     this.floor.userData.noHit = true;
     this.floor.name = 'ShadowFloor';
-    this.floor.position.z = 0.5;
-    this.basicCamera.add(this.floor);
+    this.floor.rotation.x = Math.PI / 2;
+    this.add(this.floor);
 
     this.blurPlane = new Mesh(plane);
     this.blurPlane.visible = false;
-    this.blurPlane.position.z = 0.5;
     this.basicCamera.add(this.blurPlane);
 
     this.depthMaterial = new MeshDepthMaterial();
@@ -436,8 +432,11 @@ export class Shadow extends Object3D {
 
   setOffset(offset: number) {
     if (this.mode === 'basic') {
-      // Shadow Object3D is at min.y; shift along world Y via local -Z offset
-      this.position.y += -offset + this.gap();
+      if (this.side === 'bottom') {
+        this.floor.position.y = this.boundingBox.min.y - this.position.y - offset + this.gap();
+      } else {
+        this.floor.position.z = this.boundingBox.min.z - this.position.z - offset + this.gap();
+      }
     } else {
       if (this.side === 'bottom') {
         this.floor.position.y = this.boundingBox.min.y - offset + this.gap();
@@ -480,13 +479,17 @@ export class Shadow extends Object3D {
       [min.y, min.z] = [min.z, min.y];
       [max.y, max.z] = [max.z, max.y];
       [size.y, size.z] = [size.z, size.y];
-      // Rotate so local -Z = world -Z (toward back wall)
-      this.rotation.set(-Math.PI / 2, Math.PI, 0);
-      this.position.z = boundingBox.min.z;
+      this.rotation.set(Math.PI / 2, Math.PI, 0);
     } else {
-      // Rotate so local -Z = world -Y (downward): pitch -90°
-      this.rotation.set(-Math.PI / 2, 0, 0);
-      this.position.y = boundingBox.min.y;
+      this.rotation.set(0, 0, 0);
+    }
+
+    if (side === 'bottom') {
+      this.basicCamera!.position.set(0, boundingBox.max.y - this.position.y, 0);
+      this.floor.position.set(0, boundingBox.min.y - this.position.y, 0);
+    } else {
+      this.basicCamera!.position.set(0, boundingBox.max.z - this.position.z, 0);
+      this.floor.position.set(0, 0, boundingBox.min.z - this.position.z);
     }
   }
 
@@ -498,16 +501,18 @@ export class Shadow extends Object3D {
         LOG_MAX_RESOLUTION - this.softness * (LOG_MAX_RESOLUTION - LOG_MIN_RESOLUTION));
     this.setMapSize(resolution);
 
-    // far = full model height so the depth pass captures everything above the floor
+    // Camera near=0, far = full height of model so depth captures everything
     const softFar = size.y / 2;
     const hardFar = size.y;
     this.basicCamera.near = 0;
     this.basicCamera.far = hardFar + (softFar - hardFar) * this.softness;
+
     if (this.depthMaterial != null && this.softness > 0) {
       this.depthMaterial.opacity = 1.0 / this.softness;
     }
     this.basicCamera.updateProjectionMatrix();
     this.setIntensity(this.intensity);
+    this.setOffset(0);
   }
 
   private setMapSize(maxMapSize: number) {
