@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import {BasicShadowMap, Box3, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial, MeshDepthMaterial, Object3D, OrthographicCamera, PlaneGeometry, RGBAFormat, Scene, ShaderChunk, ShaderMaterial, ShadowMaterial, Vector3, WebGLRenderer, WebGLRenderTarget} from 'three';
+import {BackSide, BasicShadowMap, Box3, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial, MeshDepthMaterial, Object3D, OrthographicCamera, PlaneGeometry, RGBAFormat, Scene, ShaderChunk, ShaderMaterial, ShadowMaterial, Vector3, WebGLRenderer, WebGLRenderTarget} from 'three';
 
 import {ModelScene} from './ModelScene.js';
 import {Damper} from './Damper.js';
@@ -209,7 +209,7 @@ export class Shadow extends Object3D {
     restoreShadowChunk();
 
     this.basicCamera = new OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0, 1);
-    this.basicCamera.rotation.x = -Math.PI / 2;  // look toward +Y (up from floor)
+    this.basicCamera.rotation.x = Math.PI / 2;
     this.basicCamera.updateProjectionMatrix();
     this.add(this.basicCamera);
 
@@ -217,13 +217,12 @@ export class Shadow extends Object3D {
     const floorMat = new MeshBasicMaterial({
       opacity: 1,
       transparent: true,
-      side: DoubleSide,
+      side: BackSide,
     });
     this.floor = new Mesh(plane, floorMat);
     this.floor.userData.noHit = true;
     this.floor.name = 'ShadowFloor';
-    this.floor.rotation.x = Math.PI / 2;
-    this.add(this.floor);
+    this.basicCamera.add(this.floor);
 
     this.blurPlane = new Mesh(plane);
     this.blurPlane.visible = false;
@@ -234,7 +233,7 @@ export class Shadow extends Object3D {
       if (shader && typeof shader.fragmentShader === 'string') {
         shader.fragmentShader = shader.fragmentShader.replace(
             'gl_FragColor = vec4( vec3( 1.0 - fragCoordZ ), opacity );',
-            'gl_FragColor = vec4( vec3( 0.0 ), ( 1.0 - fragCoordZ ) * opacity );');
+            'gl_FragColor = vec4( vec3( 1.0 - fragCoordZ ), ( 1.0 - fragCoordZ ) * opacity );');
       }
     };
     this.depthMaterial.side = DoubleSide;
@@ -432,11 +431,7 @@ export class Shadow extends Object3D {
 
   setOffset(offset: number) {
     if (this.mode === 'basic') {
-      if (this.side === 'bottom') {
-        this.floor.position.y = this.boundingBox.min.y - this.position.y - offset + this.gap();
-      } else {
-        this.floor.position.z = this.boundingBox.min.z - this.position.z - offset + this.gap();
-      }
+      this.floor.position.z = -offset + this.gap();
     } else {
       if (this.side === 'bottom') {
         this.floor.position.y = this.boundingBox.min.y - offset + this.gap();
@@ -471,23 +466,23 @@ export class Shadow extends Object3D {
   // ─── Basic mode internals ───
 
   private setupBasicScene(side: Side) {
-    const {boundingBox, size} = this;
-    boundingBox.getCenter(this.position);
+    const {boundingBox, size, position} = this;
+    boundingBox.getCenter(position);
 
     if (side === 'back') {
       const {min, max} = boundingBox;
       [min.y, min.z] = [min.z, min.y];
       [max.y, max.z] = [max.z, max.y];
       [size.y, size.z] = [size.z, size.y];
+      this.rotation.set(Math.PI / 2, Math.PI, 0);
+    } else {
+      this.rotation.set(0, 0, 0);
     }
-    this.rotation.set(0, 0, 0);
 
     if (side === 'bottom') {
-      this.basicCamera!.position.set(0, boundingBox.min.y - this.position.y, 0);
-      this.floor.position.set(0, boundingBox.min.y - this.position.y, 0);
+      position.y = boundingBox.min.y;
     } else {
-      this.basicCamera!.position.set(0, boundingBox.min.z - this.position.z, 0);
-      this.floor.position.set(0, 0, boundingBox.min.z - this.position.z);
+      position.z = boundingBox.min.y;
     }
   }
 
@@ -499,12 +494,10 @@ export class Shadow extends Object3D {
         LOG_MAX_RESOLUTION - this.softness * (LOG_MAX_RESOLUTION - LOG_MIN_RESOLUTION));
     this.setMapSize(resolution);
 
-    // Camera near=0, far = full height of model so depth captures everything
     const softFar = size.y / 2;
     const hardFar = size.y;
     this.basicCamera.near = 0;
     this.basicCamera.far = hardFar + (softFar - hardFar) * this.softness;
-
     if (this.depthMaterial != null && this.softness > 0) {
       this.depthMaterial.opacity = 1.0 / this.softness;
     }
@@ -596,8 +589,6 @@ export class Shadow extends Object3D {
 
   private setupPCSSScene(side: Side) {
     if (this.light == null) return;
-    this.position.set(0, 0, 0);
-    this.rotation.set(0, 0, 0);
     this.boundingBox.getCenter(_center);
     const min = this.boundingBox.min;
 
