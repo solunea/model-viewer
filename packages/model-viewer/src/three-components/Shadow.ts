@@ -154,7 +154,7 @@ export class Shadow extends Object3D {
 
     this.light = new DirectionalLight(0xffffff, 2);
     this.light.castShadow = true;
-    this.light.shadow.camera.near = 0.5;
+    this.light.shadow.camera.near = 0.25;
     this.light.shadow.camera.far = 100;
     this.light.shadow.bias = 0.001;
     this.light.shadow.normalBias = 0.01;
@@ -193,11 +193,11 @@ export class Shadow extends Object3D {
     if (side === 'bottom') {
       this.floor.rotation.x = -Math.PI / 2;
       this.floor.position.set(center.x, min.y, center.z);
-      this.floor.scale.set(this.size.x * 50, this.size.z * 50, 1);
+      this.floor.scale.set(this.size.x * 100, this.size.z * 100, 1);
     } else {
       this.floor.rotation.x = 0;
       this.floor.position.set(center.x, center.y, min.z);
-      this.floor.scale.set(this.size.x * 50, this.size.y * 50, 1);
+      this.floor.scale.set(this.size.x * 100, this.size.y * 100, 1);
     }
 
     this.updateLightPosition();
