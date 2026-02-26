@@ -209,7 +209,7 @@ export class Shadow extends Object3D {
     restoreShadowChunk();
 
     this.basicCamera = new OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0, 1);
-    this.basicCamera.rotation.x = Math.PI / 2;
+    this.basicCamera.rotation.x = Math.PI / 2;  // look toward -Y (down)
     this.basicCamera.updateProjectionMatrix();
     this.add(this.basicCamera);
 
@@ -222,7 +222,8 @@ export class Shadow extends Object3D {
     this.floor = new Mesh(plane, floorMat);
     this.floor.userData.noHit = true;
     this.floor.name = 'ShadowFloor';
-    this.basicCamera.add(this.floor);
+    this.floor.rotation.x = Math.PI / 2; // lay flat in world XZ plane
+    this.add(this.floor);  // child of Shadow, not camera
 
     this.blurPlane = new Mesh(plane);
     this.blurPlane.visible = false;
@@ -431,7 +432,8 @@ export class Shadow extends Object3D {
 
   setOffset(offset: number) {
     if (this.mode === 'basic') {
-      this.floor.position.z = -offset + this.gap();
+      // floor.position.y is already set in setupBasicScene; offset shifts it
+      this.floor.position.y += -offset + this.gap();
     } else {
       if (this.side === 'bottom') {
         this.floor.position.y = this.boundingBox.min.y - offset + this.gap();
@@ -466,23 +468,27 @@ export class Shadow extends Object3D {
   // ─── Basic mode internals ───
 
   private setupBasicScene(side: Side) {
-    const {boundingBox, size, position} = this;
-    boundingBox.getCenter(position);
+    const {boundingBox, size} = this;
+    boundingBox.getCenter(this.position);
 
     if (side === 'back') {
       const {min, max} = boundingBox;
       [min.y, min.z] = [min.z, min.y];
       [max.y, max.z] = [max.z, max.y];
       [size.y, size.z] = [size.z, size.y];
-      this.rotation.set(Math.PI / 2, Math.PI, 0);
-    } else {
-      this.rotation.set(0, 0, 0);
     }
+    this.rotation.set(0, 0, 0);
 
+    // Camera sits above the model, looking down (-Y)
+    // Position in local space: center of model is at (0,0,0) relative to Shadow
     if (side === 'bottom') {
-      position.y = boundingBox.min.y;
+      // Shadow center = bbox center; camera above = max.y relative to Shadow
+      this.basicCamera!.position.set(0, boundingBox.max.y - this.position.y, 0);
+      // Floor at min.y
+      this.floor.position.set(0, boundingBox.min.y - this.position.y, 0);
     } else {
-      position.z = boundingBox.min.y;
+      this.basicCamera!.position.set(0, boundingBox.max.z - this.position.z, 0);
+      this.floor.position.set(0, boundingBox.min.z - this.position.z, 0);
     }
   }
 
@@ -494,10 +500,9 @@ export class Shadow extends Object3D {
         LOG_MAX_RESOLUTION - this.softness * (LOG_MAX_RESOLUTION - LOG_MIN_RESOLUTION));
     this.setMapSize(resolution);
 
-    const softFar = size.y / 2;
-    const hardFar = size.y;
+    // Camera near=0, far = full height of model so depth captures everything
     this.basicCamera.near = 0;
-    this.basicCamera.far = hardFar + (softFar - hardFar) * this.softness;
+    this.basicCamera.far = size.y;
     if (this.depthMaterial != null && this.softness > 0) {
       this.depthMaterial.opacity = 1.0 / this.softness;
     }
