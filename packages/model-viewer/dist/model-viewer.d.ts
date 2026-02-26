@@ -474,14 +474,6 @@ declare class Hotspot extends CSS2DObject {
 }
 
 type Side = 'back' | 'bottom';
-/**
- * Real Three.js shadow implementation using DirectionalLight + ShadowMaterial
- * with PCSS (Percentage Closer Soft Shadows) for distance-dependent penumbra.
- *
- * shadow-intensity controls opacity of the shadow plane.
- * shadow-softness controls PCSS light size (penumbra spread).
- * shadow-orbit controls the light direction as spherical coords (theta, phi).
- */
 declare class Shadow extends Object3D {
     private light;
     private floor;
@@ -495,12 +487,11 @@ declare class Shadow extends Object3D {
     private phi;
     private goalTheta;
     private goalPhi;
-    private goalSoftness;
     private thetaDamper;
     private phiDamper;
-    private softnessDamper;
     private frustumWidth;
     private nearPlane;
+    private castShadowSet;
     needsUpdate: boolean;
     constructor(scene: ModelScene, softness: number, side: Side);
     /**
@@ -511,13 +502,11 @@ declare class Shadow extends Object3D {
      * Set the shadow light direction goal using spherical coordinates.
      * theta = azimuth angle (radians, around Y axis, 0 = front)
      * phi = polar angle (radians, from Y axis, 0 = directly above)
-     *
-     * If animate is false, the shadow instantly snaps to the new orbit.
      */
-    setOrbit(theta: number, phi: number, animate?: boolean): void;
+    setOrbit(theta: number, phi: number): void;
     /**
-     * Updates the shadow orbit and softness based on damper progression.
-     * Returns true if the shadow changed during this update.
+     * Updates the shadow orbit based on damper progression.
+     * Returns true if the shadow orbit changed during this update.
      */
     update(delta: number): boolean;
     /**
@@ -528,13 +517,10 @@ declare class Shadow extends Object3D {
      * Controls PCSS penumbra spread via the light size parameter.
      * softness=0 → sharp shadow, softness=1 → very soft penumbra.
      */
-    setSoftness(softness: number, animate?: boolean): void;
-    /**
-     * Force materials to recompile so they pick up the updated PCSS shader chunk.
-     */
-    private forceMaterialsRecompile;
+    setSoftness(softness: number): void;
     /**
      * Re-patch the PCSS shader with current light size and frustum dimensions.
+     * Only triggers material recompilation when the shader actually changed.
      */
     private updatePCSSPatch;
     /**
@@ -548,10 +534,15 @@ declare class Shadow extends Object3D {
     setOffset(offset: number): void;
     gap(): number;
     /**
-     * Enable shadow rendering on the WebGLRenderer and traverse the scene to set
-     * castShadow on all meshes. Called once per frame when needsUpdate is true.
+     * Enable shadow rendering on the WebGLRenderer and set castShadow on
+     * all meshes. The scene traversal is done only once for performance.
      */
     render(renderer: WebGLRenderer, scene: Scene$1): void;
+    /**
+     * Reset castShadow flag so next render will re-traverse.
+     * Call when model geometry changes.
+     */
+    invalidateCastShadow(): void;
     dispose(): void;
 }
 

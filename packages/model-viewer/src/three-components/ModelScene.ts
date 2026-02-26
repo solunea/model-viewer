@@ -1046,6 +1046,7 @@ export class ModelScene extends Scene {
     if (shadow != null) {
       const side = this.element.arPlacement === 'wall' ? 'back' : 'bottom';
       shadow.setScene(this, this.shadowSoftness, side);
+      shadow.invalidateCastShadow();
       shadow.needsUpdate = true;
     }
   }

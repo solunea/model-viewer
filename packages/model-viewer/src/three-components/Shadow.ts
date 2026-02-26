@@ -27,19 +27,34 @@ const DEFAULT_SHADOW_PHI = 0;
 // ─── PCSS shader injection ──────────────────────────────────────────
 // Percentage Closer Soft Shadows: shadows get softer the farther the
 // receiver is from the blocker, like real-world contact shadows.
-// 17 Poisson samples keeps it fast on mobile / integrated GPUs.
+// 10 Poisson samples keeps it fast on mobile / integrated GPUs.
 // ─────────────────────────────────────────────────────────────────────
 const originalShadowChunk = ShaderChunk.shadowmap_pars_fragment;
 
+// Cache last PCSS params to avoid redundant shader patching
+let lastPCSS_lightSize = -1;
+let lastPCSS_frustumWidth = -1;
+let lastPCSS_nearPlane = -1;
+
 function patchPCSS(lightSize: number, frustumWidth: number, nearPlane: number) {
+  // Skip if params haven't changed (avoids costly shader recompilation)
+  if (lightSize === lastPCSS_lightSize &&
+      frustumWidth === lastPCSS_frustumWidth &&
+      nearPlane === lastPCSS_nearPlane) {
+    return false;
+  }
+  lastPCSS_lightSize = lightSize;
+  lastPCSS_frustumWidth = frustumWidth;
+  lastPCSS_nearPlane = nearPlane;
+
   const pcssShader = `
     #define LIGHT_WORLD_SIZE ${lightSize.toFixed(6)}
     #define LIGHT_FRUSTUM_WIDTH ${frustumWidth.toFixed(6)}
     #define LIGHT_SIZE_UV (LIGHT_WORLD_SIZE / LIGHT_FRUSTUM_WIDTH)
     #define NEAR_PLANE ${nearPlane.toFixed(6)}
 
-    #define NUM_SAMPLES 17
-    #define NUM_RINGS 11
+    #define NUM_SAMPLES 10
+    #define NUM_RINGS 5
     #define BLOCKER_SEARCH_NUM_SAMPLES NUM_SAMPLES
 
     vec2 poissonDisk[NUM_SAMPLES];
@@ -80,18 +95,18 @@ function patchPCSS(lightSize: number, frustumWidth: number, nearPlane: number) {
       float sum = 0.0;
       float depth;
       #pragma unroll_loop_start
-      for( int i = 0; i < 17; i ++ ) {
+      for( int i = 0; i < 10; i ++ ) {
         depth = texture2D( shadowMap, uv + poissonDisk[ i ] * filterRadius ).r;
         if( zReceiver <= depth ) sum += 1.0;
       }
       #pragma unroll_loop_end
       #pragma unroll_loop_start
-      for( int i = 0; i < 17; i ++ ) {
+      for( int i = 0; i < 10; i ++ ) {
         depth = texture2D( shadowMap, uv + -poissonDisk[ i ].yx * filterRadius ).r;
         if( zReceiver <= depth ) sum += 1.0;
       }
       #pragma unroll_loop_end
-      return sum / ( 2.0 * float( 17 ) );
+      return sum / ( 2.0 * float( 10 ) );
     }
 
     float PCSS ( sampler2D shadowMap, vec4 coords ) {
@@ -120,6 +135,7 @@ function patchPCSS(lightSize: number, frustumWidth: number, nearPlane: number) {
           '\n\t\t\t\tfloat depth = texture2D( shadowMap, shadowCoord.xy ).r;');
 
   ShaderChunk.shadowmap_pars_fragment = shader;
+  return true;
 }
 
 /**
@@ -130,6 +146,9 @@ function patchPCSS(lightSize: number, frustumWidth: number, nearPlane: number) {
  * shadow-softness controls PCSS light size (penumbra spread).
  * shadow-orbit controls the light direction as spherical coords (theta, phi).
  */
+// Reusable vector to avoid GC pressure in hot path
+const _center = new Vector3();
+
 export class Shadow extends Object3D {
   private light: DirectionalLight;
   private floor: Mesh;
@@ -147,6 +166,7 @@ export class Shadow extends Object3D {
   private phiDamper = new Damper();
   private frustumWidth = 1;
   private nearPlane = 0.5;
+  private castShadowSet = false;
   public needsUpdate = false;
 
   constructor(scene: ModelScene, softness: number, side: Side) {
@@ -158,7 +178,7 @@ export class Shadow extends Object3D {
     this.light.shadow.camera.far = 100;
     this.light.shadow.bias = 0.001;
     this.light.shadow.normalBias = 0.01;
-    this.light.shadow.mapSize.set(1024, 1024);
+    this.light.shadow.mapSize.set(512, 512);
     this.light.name = 'ShadowLight';
 
     const plane = new PlaneGeometry(1, 1);
@@ -187,17 +207,16 @@ export class Shadow extends Object3D {
     this.maxDimension = Math.max(this.size.x, this.size.y, this.size.z);
 
     const min = this.boundingBox.min;
-    const center = new Vector3();
-    this.boundingBox.getCenter(center);
+    const center = _center;
 
     if (side === 'bottom') {
       this.floor.rotation.x = -Math.PI / 2;
       this.floor.position.set(center.x, min.y, center.z);
-      this.floor.scale.set(this.size.x * 100, this.size.z * 100, 1);
+      this.floor.scale.set(this.size.x * 10, this.size.z * 10, 1);
     } else {
       this.floor.rotation.x = 0;
       this.floor.position.set(center.x, center.y, min.z);
-      this.floor.scale.set(this.size.x * 100, this.size.y * 100, 1);
+      this.floor.scale.set(this.size.x * 10, this.size.y * 10, 1);
     }
 
     this.updateLightPosition();
@@ -243,8 +262,7 @@ export class Shadow extends Object3D {
    * Position the DirectionalLight using current theta/phi spherical coords.
    */
   private updateLightPosition() {
-    const center = new Vector3();
-    this.boundingBox.getCenter(center);
+    this.boundingBox.getCenter(_center);
 
     // Distance from center to place the light
     const radius = this.maxDimension * 2 + 1;
@@ -254,18 +272,19 @@ export class Shadow extends Object3D {
     // y = r * cos(phi)
     // z = r * sin(phi) * cos(theta)
     const sinPhi = Math.sin(this.phi);
-    const lx = center.x + radius * sinPhi * Math.sin(this.theta);
-    const ly = center.y + radius * Math.cos(this.phi);
-    const lz = center.z + radius * sinPhi * Math.cos(this.theta);
+    const lx = _center.x + radius * sinPhi * Math.sin(this.theta);
+    const ly = _center.y + radius * Math.cos(this.phi);
+    const lz = _center.z + radius * sinPhi * Math.cos(this.theta);
 
     this.light.position.set(lx, ly, lz);
-    this.light.target.position.copy(center);
+    this.light.target.position.copy(_center);
     this.light.target.updateMatrixWorld();
 
     // Fit shadow camera frustum to the bounding box (tight = sharper PCSS)
     const halfSize = this.maxDimension * 3;
-    this.frustumWidth = halfSize * 2;
-    this.nearPlane = this.light.shadow.camera.near;
+    const newFrustumWidth = halfSize * 2;
+    const newNearPlane = this.light.shadow.camera.near;
+
     this.light.shadow.camera.left = -halfSize;
     this.light.shadow.camera.right = halfSize;
     this.light.shadow.camera.top = halfSize;
@@ -273,7 +292,12 @@ export class Shadow extends Object3D {
     this.light.shadow.camera.far = radius * 10;
     this.light.shadow.camera.updateProjectionMatrix();
 
-    this.updatePCSSPatch();
+    // Only re-patch PCSS shader if frustum dimensions actually changed
+    if (newFrustumWidth !== this.frustumWidth || newNearPlane !== this.nearPlane) {
+      this.frustumWidth = newFrustumWidth;
+      this.nearPlane = newNearPlane;
+      this.updatePCSSPatch();
+    }
   }
 
   /**
@@ -284,8 +308,20 @@ export class Shadow extends Object3D {
     this.softness = softness;
     this.updatePCSSPatch();
     this.needsUpdate = true;
+  }
 
-    // Force materials to recompile with the new ShaderChunk by changing defines
+  /**
+   * Re-patch the PCSS shader with current light size and frustum dimensions.
+   * Only triggers material recompilation when the shader actually changed.
+   */
+  private updatePCSSPatch() {
+    // LIGHT_WORLD_SIZE controls penumbra: 0 = sharp, scales with model size
+    const lightSize = this.softness * this.maxDimension * 0.05;
+    const changed = patchPCSS(lightSize, this.frustumWidth, this.nearPlane);
+
+    if (!changed) return;
+
+    // Force materials to recompile with the new ShaderChunk (single traversal)
     const recompileId = Date.now();
     const forceRecompile = (m: any) => {
       m.defines = m.defines || {};
@@ -303,32 +339,6 @@ export class Shadow extends Object3D {
             meshMat.forEach(forceRecompile);
           } else if (meshMat != null) {
             forceRecompile(meshMat);
-          }
-        }
-      });
-    }
-  }
-
-  /**
-   * Re-patch the PCSS shader with current light size and frustum dimensions.
-   */
-  private updatePCSSPatch() {
-    // LIGHT_WORLD_SIZE controls penumbra: 0 = sharp, scales with model size
-    const lightSize = this.softness * this.maxDimension * 0.05;
-    patchPCSS(lightSize, this.frustumWidth, this.nearPlane);
-
-    // Force materials to recompile with the new ShaderChunk
-    const mat = this.floor.material as ShadowMaterial;
-    mat.needsUpdate = true;
-
-    if (this.parent != null) {
-      this.parent.traverse((object) => {
-        if ((object as Mesh).isMesh) {
-          const meshMat = (object as Mesh).material;
-          if (Array.isArray(meshMat)) {
-            meshMat.forEach(m => m.needsUpdate = true);
-          } else if (meshMat != null) {
-            meshMat.needsUpdate = true;
           }
         }
       });
@@ -372,8 +382,8 @@ export class Shadow extends Object3D {
   }
 
   /**
-   * Enable shadow rendering on the WebGLRenderer and traverse the scene to set
-   * castShadow on all meshes. Called once per frame when needsUpdate is true.
+   * Enable shadow rendering on the WebGLRenderer and set castShadow on
+   * all meshes. The scene traversal is done only once for performance.
    */
   render(renderer: WebGLRenderer, scene: Scene) {
     if (!renderer.shadowMap.enabled) {
@@ -382,13 +392,25 @@ export class Shadow extends Object3D {
       renderer.shadowMap.type = BasicShadowMap;
     }
 
-    scene.traverse((object) => {
-      if ((object as Mesh).isMesh && !object.userData.noHit) {
-        object.castShadow = true;
-      }
-    });
+    // Only traverse scene once to set castShadow
+    if (!this.castShadowSet) {
+      scene.traverse((object) => {
+        if ((object as Mesh).isMesh && !object.userData.noHit) {
+          object.castShadow = true;
+        }
+      });
+      this.castShadowSet = true;
+    }
 
     this.needsUpdate = false;
+  }
+
+  /**
+   * Reset castShadow flag so next render will re-traverse.
+   * Call when model geometry changes.
+   */
+  invalidateCastShadow() {
+    this.castShadowSet = false;
   }
 
   dispose() {
