@@ -36,6 +36,11 @@ let lastPCSS_lightSize = -1;
 let lastPCSS_frustumWidth = -1;
 let lastPCSS_nearPlane = -1;
 
+// Pre-patch the PCSS shader at module load time with default values.
+// This ensures the shader is compiled during the first general render,
+// not at the moment the model becomes visible (which causes a visible freeze).
+patchPCSS(0.05, 6.0, 0.25);
+
 function patchPCSS(lightSize: number, frustumWidth: number, nearPlane: number) {
   // Skip if params haven't changed (avoids costly shader recompilation)
   if (lightSize === lastPCSS_lightSize &&
