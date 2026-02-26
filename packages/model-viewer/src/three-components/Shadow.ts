@@ -209,7 +209,7 @@ export class Shadow extends Object3D {
     restoreShadowChunk();
 
     this.basicCamera = new OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0, 1);
-    this.basicCamera.rotation.x = Math.PI / 2;
+    this.basicCamera.rotation.x = -Math.PI / 2;  // look toward +Y (up from floor)
     this.basicCamera.updateProjectionMatrix();
     this.add(this.basicCamera);
 
@@ -479,16 +479,14 @@ export class Shadow extends Object3D {
       [min.y, min.z] = [min.z, min.y];
       [max.y, max.z] = [max.z, max.y];
       [size.y, size.z] = [size.z, size.y];
-      this.rotation.set(Math.PI / 2, Math.PI, 0);
-    } else {
-      this.rotation.set(0, 0, 0);
     }
+    this.rotation.set(0, 0, 0);
 
     if (side === 'bottom') {
-      this.basicCamera!.position.set(0, boundingBox.max.y - this.position.y, 0);
+      this.basicCamera!.position.set(0, boundingBox.min.y - this.position.y, 0);
       this.floor.position.set(0, boundingBox.min.y - this.position.y, 0);
     } else {
-      this.basicCamera!.position.set(0, boundingBox.max.z - this.position.z, 0);
+      this.basicCamera!.position.set(0, boundingBox.min.z - this.position.z, 0);
       this.floor.position.set(0, 0, boundingBox.min.z - this.position.z);
     }
   }
