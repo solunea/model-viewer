@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import {BackSide, BasicShadowMap, Box3, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial, MeshDepthMaterial, Object3D, OrthographicCamera, PlaneGeometry, RGBAFormat, Scene, ShaderChunk, ShaderMaterial, ShadowMaterial, Vector3, WebGLRenderer, WebGLRenderTarget} from 'three';
+import {BasicShadowMap, Box3, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial, MeshDepthMaterial, Object3D, OrthographicCamera, PlaneGeometry, RGBAFormat, Scene, ShaderChunk, ShaderMaterial, ShadowMaterial, Vector3, WebGLRenderer, WebGLRenderTarget} from 'three';
 
 import {ModelScene} from './ModelScene.js';
 import {Damper} from './Damper.js';
@@ -589,6 +589,8 @@ export class Shadow extends Object3D {
 
   private setupPCSSScene(side: Side) {
     if (this.light == null) return;
+    this.position.set(0, 0, 0);
+    this.rotation.set(0, 0, 0);
     this.boundingBox.getCenter(_center);
     const min = this.boundingBox.min;
 
