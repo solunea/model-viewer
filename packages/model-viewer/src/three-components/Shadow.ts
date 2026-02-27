@@ -258,6 +258,8 @@ export class Shadow extends Object3D {
   private initPCSSMode() {
     this.disposeMode();
     this.mode = 'pcss';
+    this.position.set(0, 0, 0);
+    this.rotation.set(0, 0, 0);
 
     this.light = new DirectionalLight(0xffffff, 2);
     this.light.castShadow = true;
