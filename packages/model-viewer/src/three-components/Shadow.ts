@@ -149,6 +149,9 @@ function patchPCSS(lightSize: number, frustumWidth: number, nearPlane: number) {
 
 function restoreShadowChunk() {
   ShaderChunk.shadowmap_pars_fragment = originalShadowChunk;
+  lastPCSS_lightSize = -1;
+  lastPCSS_frustumWidth = -1;
+  lastPCSS_nearPlane = -1;
 }
 
 const _center = new Vector3();
