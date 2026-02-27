@@ -353,8 +353,8 @@ export class Shadow extends Object3D {
   }
 
   setOrbit(theta: number, phi: number) {
-    const isZero = (theta === 0 && phi === 0);
-    const needMode = isZero ? 'basic' : 'pcss';
+    const isFlatOrbit = (phi === 0);
+    const needMode = isFlatOrbit ? 'basic' : 'pcss';
 
     if (needMode !== this.mode) {
       const savedSoftness = this.softness;
