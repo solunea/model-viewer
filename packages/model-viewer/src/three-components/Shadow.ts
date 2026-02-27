@@ -233,7 +233,7 @@ export class Shadow extends Object3D {
       if (shader && typeof shader.fragmentShader === 'string') {
         shader.fragmentShader = shader.fragmentShader.replace(
             'gl_FragColor = vec4( vec3( 1.0 - fragCoordZ ), opacity );',
-            'gl_FragColor = vec4( vec3( 1.0 - fragCoordZ ), ( 1.0 - fragCoordZ ) * opacity );');
+            'gl_FragColor = vec4( vec3( 0.0 ), ( 1.0 - fragCoordZ ) * opacity );');
       }
     };
     this.depthMaterial.side = DoubleSide;
