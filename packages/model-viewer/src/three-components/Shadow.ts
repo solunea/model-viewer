@@ -530,10 +530,13 @@ export class Shadow extends Object3D {
     }
 
     if (this.basicCamera != null) {
-      this.basicCamera.scale.set(
-          size.x * (1 + TAP_WIDTH / baseWidth),
-          size.z * (1 + TAP_WIDTH / baseHeight),
-          1);
+      const halfW = 0.5 * size.x * (1 + TAP_WIDTH / baseWidth);
+      const halfH = 0.5 * size.z * (1 + TAP_WIDTH / baseHeight);
+      this.basicCamera.left = -halfW;
+      this.basicCamera.right = halfW;
+      this.basicCamera.top = halfH;
+      this.basicCamera.bottom = -halfH;
+      this.basicCamera.updateProjectionMatrix();
     }
     this.needsUpdate = true;
   }
