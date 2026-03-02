@@ -419,6 +419,13 @@ suite('Controls', () => {
       expect(controls.interactionEnabled).to.be.false;
     });
 
+    test('switches to fps mode when configured', async () => {
+      element.mode = 'fps';
+      await element.updateComplete;
+
+      expect((controls as any).mode).to.be.equal('fps');
+    });
+
     suite('when user is interacting', () => {
       test('sets an appropriate camera-change event source', async () => {
         await rafPasses();

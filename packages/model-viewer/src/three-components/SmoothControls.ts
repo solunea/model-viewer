@@ -70,6 +70,9 @@ export const DEFAULT_OPTIONS = Object.freeze<SmoothControlsOptions>({
 // Constants
 const KEYBOARD_ORBIT_INCREMENT = Math.PI / 8;
 const ZOOM_SENSITIVITY = 0.04;
+const FPS_LOOK_SENSITIVITY = 0.002;
+const FPS_MOVE_SPEED = 2.5;
+const MAX_FPS_PITCH = Math.PI / 2 - 0.001;
 
 // The move size on pan key event
 const PAN_KEY_INCREMENT = 10;
@@ -81,6 +84,13 @@ export const KeyCode = {
   UP: 38,
   RIGHT: 39,
   DOWN: 40
+};
+
+export type ControlMode = 'orbit'|'fps';
+
+export const ControlMode: {[index: string]: ControlMode} = {
+  ORBIT: 'orbit',
+  FPS: 'fps'
 };
 
 export type ChangeSource = 'user-interaction'|'none'|'automatic';
@@ -137,6 +147,7 @@ export class SmoothControls extends EventDispatcher<{
   public changeSource = ChangeSource.NONE;
 
   private _interactionEnabled: boolean = false;
+  private _mode: ControlMode = ControlMode.ORBIT;
   private _options: SmoothControlsOptions;
   private _disableZoom = false;
   private isUserPointing = false;
@@ -165,6 +176,16 @@ export class SmoothControls extends EventDispatcher<{
   private lastSeparation = 0;
   private touchDecided = false;
 
+  // FPS state
+  private fpsYaw = 0;
+  private fpsPitch = 0;
+  private fpsLookDirty = false;
+  private fpsLookEuler = new Euler(0, 0, 0, 'YXZ');
+  private fpsMoveVector = new Vector3();
+  private fpsActivePointerId: number|null = null;
+  private fpsPointerPosition = {x: 0, y: 0};
+  private fpsKeysPressed = new Set<string>();
+
   constructor(
       readonly camera: PerspectiveCamera, readonly element: HTMLElement,
       readonly scene: ModelScene) {
@@ -177,8 +198,96 @@ export class SmoothControls extends EventDispatcher<{
     this.jumpToGoal();
   }
 
+  private updateFps(delta: number): boolean {
+    const lookChanged = this.fpsLookDirty;
+    if (lookChanged) {
+      this.fpsLookEuler.set(this.fpsPitch, this.fpsYaw, 0, 'YXZ');
+    }
+
+    let cameraMoved = false;
+
+    const forward =
+        (this.fpsKeysPressed.has('forward') ? 1 : 0) -
+        (this.fpsKeysPressed.has('backward') ? 1 : 0);
+    const strafe =
+        (this.fpsKeysPressed.has('right') ? 1 : 0) -
+        (this.fpsKeysPressed.has('left') ? 1 : 0);
+    const vertical =
+        (this.fpsKeysPressed.has('up') ? 1 : 0) -
+        (this.fpsKeysPressed.has('down') ? 1 : 0);
+
+    if (forward !== 0 || strafe !== 0 || vertical !== 0) {
+      this.fpsMoveVector.set(strafe, vertical, -forward);
+      this.fpsMoveVector.normalize();
+      this.fpsMoveVector.multiplyScalar(
+          FPS_MOVE_SPEED * this.inputSensitivity * delta / 1000);
+      this.fpsMoveVector.applyEuler(this.fpsLookEuler);
+      this.camera.position.add(this.fpsMoveVector);
+      cameraMoved = true;
+    }
+
+    if (cameraMoved || lookChanged) {
+      this.camera.setRotationFromEuler(this.fpsLookEuler);
+      this.fpsLookDirty = false;
+      return true;
+    }
+
+    return false;
+  }
+
+  private syncFpsAnglesFromCamera() {
+    this.fpsLookEuler.setFromQuaternion(this.camera.quaternion, 'YXZ');
+    this.fpsPitch = clamp(this.fpsLookEuler.x, -MAX_FPS_PITCH, MAX_FPS_PITCH);
+    this.fpsYaw = this.fpsLookEuler.y;
+    this.fpsLookEuler.set(this.fpsPitch, this.fpsYaw, 0, 'YXZ');
+    this.fpsLookDirty = true;
+  }
+
   get interactionEnabled(): boolean {
     return this._interactionEnabled;
+  }
+
+  get mode(): ControlMode {
+    return this._mode;
+  }
+
+  set mode(mode: ControlMode) {
+    const normalized = mode === ControlMode.FPS ? ControlMode.FPS :
+                                                 ControlMode.ORBIT;
+    if (normalized === this._mode) {
+      return;
+    }
+
+    this._mode = normalized;
+
+    // Reset pending interaction state when switching between control modes.
+    this.touchMode = null;
+    this.touchDecided = false;
+    this.pointers.length = 0;
+    this.panPerPixel = 0;
+
+    this.fpsKeysPressed.clear();
+    this.fpsActivePointerId = null;
+    this.fpsLookDirty = false;
+
+    this.element.removeEventListener('pointermove', this.onPointerMove);
+    this.element.removeEventListener('pointerup', this.onPointerUp);
+    this.element.removeEventListener('touchmove', this.disableScroll);
+
+    if (this.isUserPointing) {
+      this.isUserPointing = false;
+      this.dispatchEvent({type: 'pointer-change-end'});
+    }
+
+    if (this._mode === ControlMode.FPS) {
+      this.syncFpsAnglesFromCamera();
+    }
+
+    if (this._interactionEnabled) {
+      this.element.style.cursor =
+          this._mode === ControlMode.FPS ? 'crosshair' : 'grab';
+      this.updateTouchActionStyle();
+    }
   }
 
   enableInteraction() {
@@ -191,12 +300,15 @@ export class SmoothControls extends EventDispatcher<{
         element.addEventListener('wheel', this.onWheel);
       }
       element.addEventListener('keydown', this.onKeyDown);
+      element.addEventListener('keyup', this.onKeyUp);
+      element.addEventListener('blur', this.onBlur);
       // This little beauty is to work around a WebKit bug that otherwise makes
       // touch events randomly not cancelable.
       element.addEventListener('touchmove', () => {}, {passive: false});
       element.addEventListener('contextmenu', this.onContext);
 
-      this.element.style.cursor = 'grab';
+      this.element.style.cursor =
+          this._mode === ControlMode.FPS ? 'crosshair' : 'grab';
       this._interactionEnabled = true;
 
       this.updateTouchActionStyle();
@@ -213,10 +325,24 @@ export class SmoothControls extends EventDispatcher<{
       element.removeEventListener('pointercancel', this.onPointerUp);
       element.removeEventListener('wheel', this.onWheel);
       element.removeEventListener('keydown', this.onKeyDown);
+      element.removeEventListener('keyup', this.onKeyUp);
+      element.removeEventListener('blur', this.onBlur);
+      element.removeEventListener('touchmove', this.disableScroll);
       element.removeEventListener('contextmenu', this.onContext);
 
       element.style.cursor = '';
       this.touchMode = null;
+      this.touchDecided = false;
+      this.pointers.length = 0;
+      this.panPerPixel = 0;
+      this.fpsKeysPressed.clear();
+      this.fpsActivePointerId = null;
+
+      if (this.isUserPointing) {
+        this.isUserPointing = false;
+        this.dispatchEvent({type: 'pointer-change-end'});
+      }
+
       this._interactionEnabled = false;
 
       this.updateTouchActionStyle();
@@ -231,6 +357,11 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   onContext = (event: MouseEvent) => {
+    if (this._mode === ControlMode.FPS) {
+      event.preventDefault();
+      return;
+    }
+
     if (this.enablePan) {
       event.preventDefault();
     } else {
@@ -243,6 +374,138 @@ export class SmoothControls extends EventDispatcher<{
       }
     }
   };
+
+  private onKeyUp = (event: KeyboardEvent) => {
+    if (this._mode !== ControlMode.FPS) {
+      return;
+    }
+    const key = this.normalizeFpsKey(event.key);
+    if (key != null) {
+      this.fpsKeysPressed.delete(key);
+    }
+  };
+
+  private onBlur = () => {
+    this.fpsKeysPressed.clear();
+  };
+
+  private onFpsPointerDown(event: PointerEvent) {
+    if (event.pointerType === 'touch' || this.fpsActivePointerId != null) {
+      return;
+    }
+
+    const {element} = this;
+    this.fpsActivePointerId = event.pointerId;
+    this.fpsPointerPosition.x = event.clientX;
+    this.fpsPointerPosition.y = event.clientY;
+    this.changeSource = ChangeSource.USER_INTERACTION;
+
+    element.addEventListener('pointermove', this.onPointerMove);
+    element.addEventListener('pointerup', this.onPointerUp);
+    try {
+      element.setPointerCapture(event.pointerId);
+    } catch {
+    }
+
+    if (!this.isUserPointing) {
+      this.isUserPointing = true;
+      this.dispatchEvent({type: 'pointer-change-start'});
+    }
+
+    this.dispatchEvent({type: 'user-interaction'});
+    element.style.cursor = 'grabbing';
+    event.preventDefault();
+  }
+
+  private onFpsPointerMove(event: PointerEvent) {
+    if (event.pointerId !== this.fpsActivePointerId) {
+      return;
+    }
+
+    let dx = event.movementX;
+    let dy = event.movementY;
+
+    if (dx === 0 && dy === 0) {
+      dx = event.clientX - this.fpsPointerPosition.x;
+      dy = event.clientY - this.fpsPointerPosition.y;
+    }
+
+    this.fpsPointerPosition.x = event.clientX;
+    this.fpsPointerPosition.y = event.clientY;
+
+    if (dx === 0 && dy === 0) {
+      return;
+    }
+
+    this.changeSource = ChangeSource.USER_INTERACTION;
+
+    const lookSensitivity =
+        FPS_LOOK_SENSITIVITY * this.orbitSensitivity * this.inputSensitivity;
+    this.fpsYaw -= dx * lookSensitivity;
+    this.fpsPitch = clamp(
+        this.fpsPitch - dy * lookSensitivity, -MAX_FPS_PITCH, MAX_FPS_PITCH);
+    this.fpsLookDirty = true;
+  }
+
+  private onFpsPointerUp(event: PointerEvent) {
+    if (event.pointerId !== this.fpsActivePointerId) {
+      return;
+    }
+
+    const {element} = this;
+    this.fpsActivePointerId = null;
+    element.removeEventListener('pointermove', this.onPointerMove);
+    element.removeEventListener('pointerup', this.onPointerUp);
+
+    if (this.isUserPointing) {
+      this.isUserPointing = false;
+      this.dispatchEvent({type: 'pointer-change-end'});
+    }
+
+    element.style.cursor = 'crosshair';
+  }
+
+  private normalizeFpsKey(key: string): string|null {
+    switch (key) {
+      case 'w':
+      case 'W':
+      case 'ArrowUp':
+        return 'forward';
+      case 's':
+      case 'S':
+      case 'ArrowDown':
+        return 'backward';
+      case 'a':
+      case 'A':
+      case 'ArrowLeft':
+        return 'left';
+      case 'd':
+      case 'D':
+      case 'ArrowRight':
+        return 'right';
+      case 'e':
+      case 'E':
+      case ' ':
+      case 'Spacebar':
+      case 'Space':
+        return 'up';
+      case 'q':
+      case 'Q':
+      case 'Shift':
+        return 'down';
+      default:
+        return null;
+    }
+  }
+
+  private fpsKeyCodeHandler(event: KeyboardEvent): boolean {
+    const key = this.normalizeFpsKey(event.key);
+    if (key == null) {
+      return false;
+    }
+    this.fpsKeysPressed.add(key);
+    return true;
+  }
 
   set disableZoom(disable: boolean) {
     if (this._disableZoom != disable) {
@@ -439,6 +702,10 @@ export class SmoothControls extends EventDispatcher<{
    * Time and delta are measured in milliseconds.
    */
   update(_time: number, delta: number): boolean {
+    if (this._mode === ControlMode.FPS) {
+      return this.updateFps(delta);
+    }
+
     if (this.isStationary()) {
       return false;
     }
@@ -471,6 +738,11 @@ export class SmoothControls extends EventDispatcher<{
     const {style} = this.element;
 
     if (this._interactionEnabled) {
+      if (this._mode === ControlMode.FPS) {
+        style.touchAction = 'none';
+        return;
+      }
+
       const {touchAction} = this._options;
       if (this._disableZoom && touchAction !== 'none') {
         style.touchAction = 'manipulation';
@@ -672,6 +944,11 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private onPointerDown = (event: PointerEvent) => {
+    if (this._mode === ControlMode.FPS) {
+      this.onFpsPointerDown(event);
+      return;
+    }
+
     if (this.pointers.length > 2) {
       return;
     }
@@ -712,6 +989,11 @@ export class SmoothControls extends EventDispatcher<{
   };
 
   private onPointerMove = (event: PointerEvent) => {
+    if (this._mode === ControlMode.FPS) {
+      this.onFpsPointerMove(event);
+      return;
+    }
+
     const pointer =
         this.pointers.find((pointer) => pointer.id === event.pointerId);
     if (pointer == null) {
@@ -751,6 +1033,11 @@ export class SmoothControls extends EventDispatcher<{
   };
 
   private onPointerUp = (event: PointerEvent) => {
+    if (this._mode === ControlMode.FPS) {
+      this.onFpsPointerUp(event);
+      return;
+    }
+
     const {element} = this;
 
     const index =
@@ -823,6 +1110,10 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private onWheel = (event: Event) => {
+    if (this._mode === ControlMode.FPS) {
+      return;
+    }
+
     this.changeSource = ChangeSource.USER_INTERACTION;
 
     const deltaZoom = (event as WheelEvent).deltaY *
@@ -835,6 +1126,16 @@ export class SmoothControls extends EventDispatcher<{
   };
 
   private onKeyDown = (event: KeyboardEvent) => {
+    if (this._mode === ControlMode.FPS) {
+      const relevantKey = this.fpsKeyCodeHandler(event);
+      if (relevantKey) {
+        this.changeSource = ChangeSource.USER_INTERACTION;
+        event.preventDefault();
+        this.dispatchEvent({type: 'user-interaction'});
+      }
+      return;
+    }
+
     // We track if the key is actually one we respond to, so as not to
     // accidentally clobber unrelated key inputs when the <model-viewer> has
     // focus.

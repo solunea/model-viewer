@@ -22,7 +22,7 @@ import {degreesToRadians, normalizeUnit} from '../styles/conversions.js';
 import {EvaluatedStyle, Intrinsics, SphericalIntrinsics, StyleEvaluator, Vector3Intrinsics} from '../styles/evaluators.js';
 import {IdentNode, NumberNode, numberNode, parseExpressions} from '../styles/parsers.js';
 import {DECAY_MILLISECONDS} from '../three-components/Damper.js';
-import {ChangeSource, PointerChangeEvent, SmoothControls} from '../three-components/SmoothControls.js';
+import {ChangeSource, ControlMode, PointerChangeEvent, SmoothControls} from '../three-components/SmoothControls.js';
 import {Constructor} from '../utilities.js';
 import {Path, timeline, TimingFunction} from '../utilities/animation.js';
 
@@ -108,6 +108,7 @@ export interface A11yTranslationsInterface {
 export type InteractionPromptStrategy = 'auto'|'none';
 export type InteractionPromptStyle = 'basic'|'wiggle';
 export type TouchAction = 'pan-y'|'pan-x'|'none';
+export type CameraControlMode = 'orbit'|'fps';
 
 export const InteractionPromptStrategy:
     {[index: string]: InteractionPromptStrategy} = {
@@ -125,6 +126,11 @@ export const TouchAction: {[index: string]: TouchAction} = {
   PAN_Y: 'pan-y',
   PAN_X: 'pan-x',
   NONE: 'none'
+};
+
+export const CameraControlMode: {[index: string]: CameraControlMode} = {
+  ORBIT: 'orbit',
+  FPS: 'fps'
 };
 
 export const fieldOfViewIntrinsics = () => {
@@ -248,6 +254,7 @@ const $syncMaxFieldOfView = Symbol('syncMaxFieldOfView');
 
 export declare interface ControlsInterface {
   cameraControls: boolean;
+  mode: CameraControlMode;
   cameraOrbit: string;
   cameraTarget: string;
   fieldOfView: string;
@@ -286,6 +293,9 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
   class ControlsModelViewerElement extends ModelViewerElement {
     @property({type: Boolean, attribute: 'camera-controls'})
     cameraControls: boolean = false;
+
+    @property({type: String, attribute: 'mode'})
+    mode: CameraControlMode = CameraControlMode.ORBIT;
 
     @style({
       intrinsics: cameraOrbitIntrinsics,
@@ -512,6 +522,12 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
           this[$deferInteractionPrompt]();
         }
         this[$userInputElement].setAttribute('aria-label', this[$ariaLabel]);
+      }
+
+      if (changedProperties.has('mode')) {
+        controls.mode =
+            this.mode === CameraControlMode.FPS ? ControlMode.FPS :
+                                                  ControlMode.ORBIT;
       }
 
       if (changedProperties.has('disableZoom')) {
