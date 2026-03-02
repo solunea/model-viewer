@@ -487,7 +487,7 @@ export class SmoothControls extends EventDispatcher<{
     element.removeEventListener('pointerup', this.onPointerUp);
 
     if (this.enablePan && this.enableTap) {
-      this.recenter(event);
+      this.recenterFromViewCenter(event);
     }
 
     if (this.isUserPointing) {
@@ -496,6 +496,31 @@ export class SmoothControls extends EventDispatcher<{
     }
 
     element.style.cursor = 'crosshair';
+  }
+
+  private recenterFromViewCenter(pointer: PointerEvent) {
+    if (performance.now() > this.startTime + TAP_MS ||
+        Math.abs(pointer.clientX - this.startPointerPosition.clientX) >
+            TAP_DISTANCE ||
+        Math.abs(pointer.clientY - this.startPointerPosition.clientY) >
+            TAP_DISTANCE) {
+      return;
+    }
+    const {scene} = this;
+
+    // In FPS mode, retarget from the camera center/crosshair rather than
+    // pointer coordinates so raycast stays aligned with camera orientation.
+    const hit = scene.positionAndNormalFromPoint(vector2.set(0, 0));
+
+    if (hit == null) {
+      const {cameraTarget} = scene.element;
+      scene.element.cameraTarget = '';
+      scene.element.cameraTarget = cameraTarget;
+      this.userAdjustOrbit(0, 0, 1);
+    } else {
+      scene.target.worldToLocal(hit.position);
+      scene.setTarget(hit.position.x, hit.position.y, hit.position.z);
+    }
   }
 
   private normalizeFpsInput(
