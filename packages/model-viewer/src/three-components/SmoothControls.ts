@@ -243,6 +243,20 @@ export class SmoothControls extends EventDispatcher<{
     this.fpsLookDirty = true;
   }
 
+  private syncOrbitStateFromCamera() {
+    this.spherical.setFromVector3(this.camera.position);
+    this.spherical.makeSafe();
+    this.goalSpherical.copy(this.spherical);
+    this.logFov = Math.log(this.camera.fov);
+    this.goalLogFov = this.logFov;
+  }
+
+  private snapOrbitToGoal() {
+    this.spherical.copy(this.goalSpherical);
+    this.logFov = this.goalLogFov;
+    this.moveCamera();
+  }
+
   get interactionEnabled(): boolean {
     return this._interactionEnabled;
   }
@@ -256,6 +270,12 @@ export class SmoothControls extends EventDispatcher<{
                                                  ControlMode.ORBIT;
     if (normalized === this._mode) {
       return;
+    }
+
+    if (normalized === ControlMode.FPS) {
+      this.snapOrbitToGoal();
+    } else {
+      this.syncOrbitStateFromCamera();
     }
 
     this._mode = normalized;
@@ -390,14 +410,19 @@ export class SmoothControls extends EventDispatcher<{
   };
 
   private onFpsPointerDown(event: PointerEvent) {
-    if (event.pointerType === 'touch' || this.fpsActivePointerId != null) {
+    if (this.fpsActivePointerId != null) {
       return;
     }
 
     const {element} = this;
+    element.focus();
+
     this.fpsActivePointerId = event.pointerId;
     this.fpsPointerPosition.x = event.clientX;
     this.fpsPointerPosition.y = event.clientY;
+    this.startPointerPosition.clientX = event.clientX;
+    this.startPointerPosition.clientY = event.clientY;
+    this.startTime = performance.now();
     this.changeSource = ChangeSource.USER_INTERACTION;
 
     element.addEventListener('pointermove', this.onPointerMove);
@@ -456,6 +481,10 @@ export class SmoothControls extends EventDispatcher<{
     this.fpsActivePointerId = null;
     element.removeEventListener('pointermove', this.onPointerMove);
     element.removeEventListener('pointerup', this.onPointerUp);
+
+    if (this.enablePan && this.enableTap) {
+      this.recenter(event);
+    }
 
     if (this.isUserPointing) {
       this.isUserPointing = false;
@@ -615,6 +644,11 @@ export class SmoothControls extends EventDispatcher<{
     this.goalSpherical.radius = nextRadius;
     this.goalSpherical.makeSafe();
 
+    if (this._mode === ControlMode.FPS) {
+      this.snapOrbitToGoal();
+      this.syncFpsAnglesFromCamera();
+    }
+
     return true;
   }
 
@@ -633,6 +667,14 @@ export class SmoothControls extends EventDispatcher<{
     const {minimumFieldOfView, maximumFieldOfView} = this._options;
     fov = clamp(fov, minimumFieldOfView!, maximumFieldOfView!);
     this.goalLogFov = Math.log(fov);
+
+    if (this._mode === ControlMode.FPS) {
+      this.logFov = this.goalLogFov;
+      if (this.camera.fov !== fov) {
+        this.camera.fov = fov;
+        this.camera.updateProjectionMatrix();
+      }
+    }
   }
 
   /**
