@@ -1541,8 +1541,13 @@ type TouchAction = 'pan-y' | 'pan-x' | 'none';
 declare const TouchAction: {
     [index: string]: TouchAction;
 };
+type CameraControlMode = 'orbit' | 'fps';
+declare const CameraControlMode: {
+    [index: string]: CameraControlMode;
+};
 declare interface ControlsInterface {
     cameraControls: boolean;
+    mode: CameraControlMode;
     cameraOrbit: string;
     cameraTarget: string;
     fieldOfView: string;
