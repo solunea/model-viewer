@@ -419,19 +419,24 @@ export class ModelScene extends Scene {
     if (model == null) {
       return;
     }
-    const orientation = parseExpressions(this.element.orientation)[0]
-                            .terms as [NumberNode, NumberNode, NumberNode];
+    const orientationExpr = parseExpressions(this.element.orientation)[0];
+    if (orientationExpr != null) {
+      const orientation =
+          orientationExpr.terms as [NumberNode, NumberNode, NumberNode];
 
-    const roll = normalizeUnit(orientation[0]).number;
-    const pitch = normalizeUnit(orientation[1]).number;
-    const yaw = normalizeUnit(orientation[2]).number;
+      const roll = normalizeUnit(orientation[0]).number;
+      const pitch = normalizeUnit(orientation[1]).number;
+      const yaw = normalizeUnit(orientation[2]).number;
 
-    model.quaternion.setFromEuler(new Euler(pitch, yaw, roll, 'YXZ'));
+      model.quaternion.setFromEuler(new Euler(pitch, yaw, roll, 'YXZ'));
+    }
 
-    const scale = parseExpressions(this.element.scale)[0]
-                      .terms as [NumberNode, NumberNode, NumberNode];
+    const scaleExpr = parseExpressions(this.element.scale)[0];
+    if (scaleExpr != null) {
+      const scale = scaleExpr.terms as [NumberNode, NumberNode, NumberNode];
 
-    model.scale.set(scale[0].number, scale[1].number, scale[2].number);
+      model.scale.set(scale[0].number, scale[1].number, scale[2].number);
+    }
   }
 
   updateBoundingBox() {
