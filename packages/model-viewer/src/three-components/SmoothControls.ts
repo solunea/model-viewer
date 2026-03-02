@@ -71,7 +71,9 @@ export const DEFAULT_OPTIONS = Object.freeze<SmoothControlsOptions>({
 const KEYBOARD_ORBIT_INCREMENT = Math.PI / 8;
 const ZOOM_SENSITIVITY = 0.04;
 const FPS_LOOK_SENSITIVITY = 0.002;
-const FPS_MOVE_SPEED = 2.5;
+const FPS_MOVE_SPEED = 4;
+const FPS_MOVE_RADIUS_FACTOR = 1.5;
+const FPS_WHEEL_DOLLY_FACTOR = 0.6;
 const MAX_FPS_PITCH = Math.PI / 2 - 0.001;
 
 // The move size on pan key event
@@ -217,10 +219,12 @@ export class SmoothControls extends EventDispatcher<{
         (this.fpsKeysPressed.has('down') ? 1 : 0);
 
     if (forward !== 0 || strafe !== 0 || vertical !== 0) {
+      const sceneScaledMoveSpeed = Math.max(
+          FPS_MOVE_SPEED, this.scene.boundingSphere.radius * FPS_MOVE_RADIUS_FACTOR);
       this.fpsMoveVector.set(strafe, vertical, -forward);
       this.fpsMoveVector.normalize();
       this.fpsMoveVector.multiplyScalar(
-          FPS_MOVE_SPEED * this.inputSensitivity * delta / 1000);
+          sceneScaledMoveSpeed * this.inputSensitivity * delta / 1000);
       this.fpsMoveVector.applyEuler(this.fpsLookEuler);
       this.camera.position.add(this.fpsMoveVector);
       cameraMoved = true;
@@ -399,7 +403,7 @@ export class SmoothControls extends EventDispatcher<{
     if (this._mode !== ControlMode.FPS) {
       return;
     }
-    const key = this.normalizeFpsKey(event.key);
+    const key = this.normalizeFpsInput(event.key, event.code);
     if (key != null) {
       this.fpsKeysPressed.delete(key);
     }
@@ -494,10 +498,39 @@ export class SmoothControls extends EventDispatcher<{
     element.style.cursor = 'crosshair';
   }
 
-  private normalizeFpsKey(key: string): string|null {
+  private normalizeFpsInput(
+      key: string, code: string = ''): string|null {
+    switch (code) {
+      case 'KeyW':
+      case 'KeyZ':
+      case 'ArrowUp':
+        return 'forward';
+      case 'KeyS':
+      case 'ArrowDown':
+        return 'backward';
+      case 'KeyA':
+      case 'KeyQ':
+      case 'ArrowLeft':
+        return 'left';
+      case 'KeyD':
+      case 'ArrowRight':
+        return 'right';
+      case 'KeyE':
+      case 'Space':
+        return 'up';
+      case 'ShiftLeft':
+      case 'ShiftRight':
+      case 'KeyC':
+        return 'down';
+      default:
+        break;
+    }
+
     switch (key) {
       case 'w':
       case 'W':
+      case 'z':
+      case 'Z':
       case 'ArrowUp':
         return 'forward';
       case 's':
@@ -506,6 +539,8 @@ export class SmoothControls extends EventDispatcher<{
         return 'backward';
       case 'a':
       case 'A':
+      case 'q':
+      case 'Q':
       case 'ArrowLeft':
         return 'left';
       case 'd':
@@ -518,9 +553,9 @@ export class SmoothControls extends EventDispatcher<{
       case 'Spacebar':
       case 'Space':
         return 'up';
-      case 'q':
-      case 'Q':
       case 'Shift':
+      case 'c':
+      case 'C':
         return 'down';
       default:
         return null;
@@ -528,7 +563,7 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private fpsKeyCodeHandler(event: KeyboardEvent): boolean {
-    const key = this.normalizeFpsKey(event.key);
+    const key = this.normalizeFpsInput(event.key, event.code);
     if (key == null) {
       return false;
     }
@@ -1153,6 +1188,22 @@ export class SmoothControls extends EventDispatcher<{
 
   private onWheel = (event: Event) => {
     if (this._mode === ControlMode.FPS) {
+      this.changeSource = ChangeSource.USER_INTERACTION;
+      const wheelEvent = event as WheelEvent;
+      const wheelDelta =
+          wheelEvent.deltaY * (wheelEvent.deltaMode == 1 ? 18 : 1);
+      const sceneScaledMoveSpeed = Math.max(
+          FPS_MOVE_SPEED, this.scene.boundingSphere.radius * FPS_MOVE_RADIUS_FACTOR);
+      const dollyDistance = wheelDelta * ZOOM_SENSITIVITY *
+          sceneScaledMoveSpeed * FPS_WHEEL_DOLLY_FACTOR * this.inputSensitivity /
+          30;
+      this.fpsMoveVector.set(0, 0, 1);
+      this.fpsMoveVector.applyQuaternion(this.camera.quaternion);
+      this.fpsMoveVector.multiplyScalar(dollyDistance);
+      this.camera.position.add(this.fpsMoveVector);
+
+      this.dispatchEvent({type: 'user-interaction'});
+      event.preventDefault();
       return;
     }
 
