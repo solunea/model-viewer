@@ -372,7 +372,7 @@ export class Shadow extends Object3D {
     this.needsUpdate = true;
   }
 
-  update(): boolean {
+  update(_delta: number): boolean {
     if (this.mode === 'basic') return false;
     if (this.theta === this.goalTheta && this.phi === this.goalPhi) {
       return false;

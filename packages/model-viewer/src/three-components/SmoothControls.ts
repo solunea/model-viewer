@@ -17,7 +17,7 @@ import {Euler, Event as ThreeEvent, EventDispatcher, Matrix3, PerspectiveCamera,
 import {$panElement, TouchAction} from '../features/controls.js';
 import {clamp} from '../utilities.js';
 
-import {Damper, SETTLING_TIME} from './Damper.js';
+import {Damper, DECAY_MILLISECONDS, SETTLING_TIME} from './Damper.js';
 import {ModelScene} from './ModelScene.js';
 
 const PAN_SENSITIVITY = 0.018;
@@ -153,6 +153,7 @@ export class SmoothControls extends EventDispatcher<{
   private _options: SmoothControlsOptions;
   private _disableZoom = false;
   private isUserPointing = false;
+  private fpsDamperDecayTime = DECAY_MILLISECONDS;
 
   // Pan state
   public enablePan = true;
@@ -181,8 +182,16 @@ export class SmoothControls extends EventDispatcher<{
   // FPS state
   private fpsYaw = 0;
   private fpsPitch = 0;
-  private fpsLookDirty = false;
+  private goalFpsYaw = 0;
+  private goalFpsPitch = 0;
+  private fpsYawDamper = new Damper();
+  private fpsPitchDamper = new Damper();
   private fpsLookEuler = new Euler(0, 0, 0, 'YXZ');
+  private fpsSmoothedMove = new Vector3();
+  private goalFpsMove = new Vector3();
+  private fpsMoveXDamper = new Damper();
+  private fpsMoveYDamper = new Damper();
+  private fpsMoveZDamper = new Damper();
   private fpsMoveVector = new Vector3();
   private fpsActivePointerId: number|null = null;
   private fpsPointerPosition = {x: 0, y: 0};
@@ -201,10 +210,21 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private updateFps(delta: number): boolean {
-    const lookChanged = this.fpsLookDirty;
-    if (lookChanged) {
-      this.fpsLookEuler.set(this.fpsPitch, this.fpsYaw, 0, 'YXZ');
+    const initialYaw = this.fpsYaw;
+    const initialPitch = this.fpsPitch;
+
+    let dYaw = this.fpsYaw - this.goalFpsYaw;
+    if (Math.abs(dYaw) > Math.PI) {
+      this.fpsYaw -= Math.sign(dYaw) * 2 * Math.PI;
     }
+
+    this.fpsYaw = this.fpsYawDamper.update(
+        this.fpsYaw, this.goalFpsYaw, delta, Math.PI);
+    this.fpsPitch = this.fpsPitchDamper.update(
+        this.fpsPitch, this.goalFpsPitch, delta, MAX_FPS_PITCH);
+    this.fpsLookEuler.set(this.fpsPitch, this.fpsYaw, 0, 'YXZ');
+
+    const lookChanged = this.fpsYaw !== initialYaw || this.fpsPitch !== initialPitch;
 
     let cameraMoved = false;
 
@@ -218,11 +238,22 @@ export class SmoothControls extends EventDispatcher<{
         (this.fpsKeysPressed.has('up') ? 1 : 0) -
         (this.fpsKeysPressed.has('down') ? 1 : 0);
 
-    if (forward !== 0 || strafe !== 0 || vertical !== 0) {
+    this.goalFpsMove.set(strafe, vertical, -forward);
+    this.fpsSmoothedMove.x = this.fpsMoveXDamper.update(
+        this.fpsSmoothedMove.x, this.goalFpsMove.x, delta, 1);
+    this.fpsSmoothedMove.y = this.fpsMoveYDamper.update(
+        this.fpsSmoothedMove.y, this.goalFpsMove.y, delta, 1);
+    this.fpsSmoothedMove.z = this.fpsMoveZDamper.update(
+        this.fpsSmoothedMove.z, this.goalFpsMove.z, delta, 1);
+
+    const moveLengthSq = this.fpsSmoothedMove.lengthSq();
+    if (moveLengthSq > 1e-8) {
       const sceneScaledMoveSpeed = Math.max(
           FPS_MOVE_SPEED, this.scene.boundingSphere.radius * FPS_MOVE_RADIUS_FACTOR);
-      this.fpsMoveVector.set(strafe, vertical, -forward);
-      this.fpsMoveVector.normalize();
+      this.fpsMoveVector.copy(this.fpsSmoothedMove);
+      if (moveLengthSq > 1) {
+        this.fpsMoveVector.normalize();
+      }
       this.fpsMoveVector.multiplyScalar(
           sceneScaledMoveSpeed * this.inputSensitivity * delta / 1000);
       this.fpsMoveVector.applyEuler(this.fpsLookEuler);
@@ -232,7 +263,6 @@ export class SmoothControls extends EventDispatcher<{
 
     if (cameraMoved || lookChanged) {
       this.camera.setRotationFromEuler(this.fpsLookEuler);
-      this.fpsLookDirty = false;
       return true;
     }
 
@@ -243,8 +273,17 @@ export class SmoothControls extends EventDispatcher<{
     this.fpsLookEuler.setFromQuaternion(this.camera.quaternion, 'YXZ');
     this.fpsPitch = clamp(this.fpsLookEuler.x, -MAX_FPS_PITCH, MAX_FPS_PITCH);
     this.fpsYaw = this.fpsLookEuler.y;
+    this.goalFpsPitch = this.fpsPitch;
+    this.goalFpsYaw = this.fpsYaw;
     this.fpsLookEuler.set(this.fpsPitch, this.fpsYaw, 0, 'YXZ');
-    this.fpsLookDirty = true;
+  }
+
+  private resetFpsDampers() {
+    this.fpsYawDamper = new Damper(this.fpsDamperDecayTime);
+    this.fpsPitchDamper = new Damper(this.fpsDamperDecayTime);
+    this.fpsMoveXDamper = new Damper(this.fpsDamperDecayTime);
+    this.fpsMoveYDamper = new Damper(this.fpsDamperDecayTime);
+    this.fpsMoveZDamper = new Damper(this.fpsDamperDecayTime);
   }
 
   private syncOrbitStateFromCamera() {
@@ -292,7 +331,9 @@ export class SmoothControls extends EventDispatcher<{
 
     this.fpsKeysPressed.clear();
     this.fpsActivePointerId = null;
-    this.fpsLookDirty = false;
+    this.goalFpsMove.set(0, 0, 0);
+    this.fpsSmoothedMove.set(0, 0, 0);
+    this.resetFpsDampers();
 
     this.element.removeEventListener('pointermove', this.onPointerMove);
     this.element.removeEventListener('pointerup', this.onPointerUp);
@@ -308,8 +349,7 @@ export class SmoothControls extends EventDispatcher<{
     }
 
     if (this._interactionEnabled) {
-      this.element.style.cursor =
-          this._mode === ControlMode.FPS ? 'crosshair' : 'grab';
+      this.element.style.cursor = 'grab';
       this.updateTouchActionStyle();
     }
   }
@@ -331,8 +371,7 @@ export class SmoothControls extends EventDispatcher<{
       element.addEventListener('touchmove', () => {}, {passive: false});
       element.addEventListener('contextmenu', this.onContext);
 
-      this.element.style.cursor =
-          this._mode === ControlMode.FPS ? 'crosshair' : 'grab';
+      this.element.style.cursor = 'grab';
       this._interactionEnabled = true;
 
       this.updateTouchActionStyle();
@@ -470,10 +509,11 @@ export class SmoothControls extends EventDispatcher<{
 
     const lookSensitivity =
         FPS_LOOK_SENSITIVITY * this.orbitSensitivity * this.inputSensitivity;
-    this.fpsYaw -= dx * lookSensitivity;
-    this.fpsPitch = clamp(
-        this.fpsPitch - dy * lookSensitivity, -MAX_FPS_PITCH, MAX_FPS_PITCH);
-    this.fpsLookDirty = true;
+    this.goalFpsYaw -= dx * lookSensitivity;
+    this.goalFpsPitch = clamp(
+        this.goalFpsPitch - dy * lookSensitivity,
+        -MAX_FPS_PITCH,
+        MAX_FPS_PITCH);
   }
 
   private onFpsPointerUp(event: PointerEvent) {
@@ -495,7 +535,7 @@ export class SmoothControls extends EventDispatcher<{
       this.dispatchEvent({type: 'pointer-change-end'});
     }
 
-    element.style.cursor = 'crosshair';
+    element.style.cursor = 'grab';
   }
 
   private recenterFromViewCenter(pointer: PointerEvent) {
@@ -741,10 +781,16 @@ export class SmoothControls extends EventDispatcher<{
    * Sets the smoothing decay time.
    */
   setDamperDecayTime(decayMilliseconds: number) {
+    this.fpsDamperDecayTime = decayMilliseconds;
     this.thetaDamper.setDecayTime(decayMilliseconds);
     this.phiDamper.setDecayTime(decayMilliseconds);
     this.radiusDamper.setDecayTime(decayMilliseconds);
     this.fovDamper.setDecayTime(decayMilliseconds);
+    this.fpsYawDamper.setDecayTime(decayMilliseconds);
+    this.fpsPitchDamper.setDecayTime(decayMilliseconds);
+    this.fpsMoveXDamper.setDecayTime(decayMilliseconds);
+    this.fpsMoveYDamper.setDecayTime(decayMilliseconds);
+    this.fpsMoveZDamper.setDecayTime(decayMilliseconds);
   }
 
   /**

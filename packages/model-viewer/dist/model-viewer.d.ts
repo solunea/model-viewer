@@ -494,8 +494,6 @@ declare class Shadow extends Object3D {
     private phi;
     private goalTheta;
     private goalPhi;
-    private thetaDamper;
-    private phiDamper;
     needsUpdate: boolean;
     private basicCamera;
     private renderTarget;
@@ -514,7 +512,7 @@ declare class Shadow extends Object3D {
     private disposeMode;
     setScene(scene: ModelScene, softness: number, side: Side): void;
     setOrbit(theta: number, phi: number): void;
-    update(delta: number): boolean;
+    update(): boolean;
     setSoftness(softness: number): void;
     setIntensity(intensity: number): void;
     getIntensity(): number;

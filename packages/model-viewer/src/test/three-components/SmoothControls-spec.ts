@@ -19,7 +19,7 @@ import {PerspectiveCamera, Vector3} from 'three';
 import {$controls} from '../../features/controls.js';
 import {$userInputElement} from '../../model-viewer-base.js';
 import {ModelViewerElement} from '../../model-viewer.js';
-import {SmoothControls} from '../../three-components/SmoothControls.js';
+import {ControlMode, SmoothControls} from '../../three-components/SmoothControls.js';
 import {waitForEvent} from '../../utilities.js';
 import {assetPath, dispatchSyntheticEvent} from '../helpers.js';
 
@@ -172,6 +172,43 @@ suite('SmoothControls', () => {
           const postCameraTarget = controls.scene.getTarget();
           expect(postCameraTarget.x).to.be.greaterThan(initialCameraTarget.x);
         });
+      });
+    });
+
+    suite('fps mode', () => {
+      test('smoothes look updates before reaching the goal', () => {
+        controls.mode = ControlMode.FPS;
+
+        element.dispatchEvent(new PointerEvent(
+            'pointerdown', {pointerId: 21, clientX: 10, clientY: 10}));
+        element.dispatchEvent(new PointerEvent(
+            'pointermove', {pointerId: 21, clientX: 70, clientY: 10}));
+
+        controls.update(performance.now(), ONE_FRAME_DELTA);
+
+        const fpsYaw = (controls as any).fpsYaw;
+        const goalFpsYaw = (controls as any).goalFpsYaw;
+        expect(Math.abs(goalFpsYaw - fpsYaw)).to.be.greaterThan(0.0001);
+
+        settleControls(controls);
+        expect((controls as any).fpsYaw).to.be.closeTo((controls as any).goalFpsYaw, 0.0001);
+
+        element.dispatchEvent(new PointerEvent(
+            'pointerup', {pointerId: 21, clientX: 70, clientY: 10}));
+      });
+
+      test('uses pan cursor behavior while dragging', () => {
+        controls.mode = ControlMode.FPS;
+
+        expect(element.style.cursor).to.be.equal('grab');
+
+        element.dispatchEvent(new PointerEvent(
+            'pointerdown', {pointerId: 31, clientX: 20, clientY: 20}));
+        expect(element.style.cursor).to.be.equal('grabbing');
+
+        element.dispatchEvent(new PointerEvent(
+            'pointerup', {pointerId: 31, clientX: 20, clientY: 20}));
+        expect(element.style.cursor).to.be.equal('grab');
       });
     });
 
