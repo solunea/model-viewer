@@ -16,7 +16,6 @@
 import {BackSide, BasicShadowMap, Box3, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial, MeshDepthMaterial, Object3D, OrthographicCamera, PlaneGeometry, RGBAFormat, Scene, ShaderChunk, ShaderMaterial, ShadowMaterial, Vector3, WebGLRenderer, WebGLRenderTarget} from 'three';
 
 import {ModelScene} from './ModelScene.js';
-import {Damper} from './Damper.js';
 
 export type Side = 'back'|'bottom';
 export type ShadowMode = 'basic'|'pcss';
@@ -178,8 +177,6 @@ export class Shadow extends Object3D {
   private phi = DEFAULT_SHADOW_PHI;
   private goalTheta = DEFAULT_SHADOW_THETA;
   private goalPhi = DEFAULT_SHADOW_PHI;
-  private thetaDamper = new Damper();
-  private phiDamper = new Damper();
   public needsUpdate = false;
 
   // ─── Basic mode state ───
@@ -375,19 +372,14 @@ export class Shadow extends Object3D {
     this.needsUpdate = true;
   }
 
-  update(delta: number): boolean {
+  update(): boolean {
     if (this.mode === 'basic') return false;
     if (this.theta === this.goalTheta && this.phi === this.goalPhi) {
       return false;
     }
 
-    let dTheta = this.theta - this.goalTheta;
-    if (Math.abs(dTheta) > Math.PI) {
-      this.theta -= Math.sign(dTheta) * 2 * Math.PI;
-    }
-
-    this.theta = this.thetaDamper.update(this.theta, this.goalTheta, delta, Math.PI);
-    this.phi = this.phiDamper.update(this.phi, this.goalPhi, delta, Math.PI / 2);
+    this.theta = this.goalTheta;
+    this.phi = this.goalPhi;
 
     this.updatePCSSLightPosition();
     this.needsUpdate = true;
