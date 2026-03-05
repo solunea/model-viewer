@@ -1,0 +1,5 @@
+commit e266dd3f6e8d1107e0431c2eca0e51c7c69c4c8a
+Author: jwan <jonathan.wanty@solunea.fr>
+Date:   Thu Mar 5 12:43:32 2026 +0100
+
+    chore: rebuild minified dist after swapping CompressedCubeTexture and CompressedArrayTexture import aliases (Ee↔Ie, Et↔It)
