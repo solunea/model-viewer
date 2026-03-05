@@ -210,6 +210,42 @@ suite('SmoothControls', () => {
             'pointerup', {pointerId: 31, clientX: 20, clientY: 20}));
         expect(element.style.cursor).to.be.equal('grab');
       });
+
+      test('maps right click drag to movement instead of look', () => {
+        controls.mode = ControlMode.FPS;
+
+        const initialCameraPosition = camera.position.clone();
+        const initialGoalFpsYaw = (controls as any).goalFpsYaw;
+        const initialGoalFpsPitch = (controls as any).goalFpsPitch;
+
+        element.dispatchEvent(new PointerEvent('pointerdown', {
+          pointerId: 41,
+          button: 2,
+          clientX: 50,
+          clientY: 50
+        }));
+        element.dispatchEvent(new PointerEvent('pointermove', {
+          pointerId: 41,
+          button: 2,
+          clientX: 50,
+          clientY: 20
+        }));
+
+        controls.update(performance.now(), ONE_FRAME_DELTA);
+
+        expect(camera.position.distanceTo(initialCameraPosition)).to.be.greaterThan(
+            0.0001);
+        expect((controls as any).goalFpsYaw).to.be.closeTo(initialGoalFpsYaw, 0.000001);
+        expect((controls as any).goalFpsPitch)
+            .to.be.closeTo(initialGoalFpsPitch, 0.000001);
+
+        element.dispatchEvent(new PointerEvent('pointerup', {
+          pointerId: 41,
+          button: 2,
+          clientX: 50,
+          clientY: 20
+        }));
+      });
     });
 
     suite('customizing options', () => {

@@ -512,7 +512,7 @@ declare class Shadow extends Object3D {
     private disposeMode;
     setScene(scene: ModelScene, softness: number, side: Side): void;
     setOrbit(theta: number, phi: number): void;
-    update(): boolean;
+    update(_delta: number): boolean;
     setSoftness(softness: number): void;
     setIntensity(intensity: number): void;
     getIntensity(): number;

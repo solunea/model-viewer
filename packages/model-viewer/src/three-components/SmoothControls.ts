@@ -71,6 +71,7 @@ export const DEFAULT_OPTIONS = Object.freeze<SmoothControlsOptions>({
 const KEYBOARD_ORBIT_INCREMENT = Math.PI / 8;
 const ZOOM_SENSITIVITY = 0.04;
 const FPS_LOOK_SENSITIVITY = 0.002;
+const FPS_DRAG_MOVE_SENSITIVITY = 0.04;
 const FPS_MOVE_SPEED = 4;
 const FPS_MOVE_RADIUS_FACTOR = 1.5;
 const FPS_WHEEL_DOLLY_FACTOR = 0.6;
@@ -193,7 +194,9 @@ export class SmoothControls extends EventDispatcher<{
   private fpsMoveYDamper = new Damper();
   private fpsMoveZDamper = new Damper();
   private fpsMoveVector = new Vector3();
+  private fpsDragMoveInput = new Vector2();
   private fpsActivePointerId: number|null = null;
+  private fpsActiveMouseButton: number|null = null;
   private fpsPointerPosition = {x: 0, y: 0};
   private fpsKeysPressed = new Set<string>();
 
@@ -230,13 +233,17 @@ export class SmoothControls extends EventDispatcher<{
 
     const forward =
         (this.fpsKeysPressed.has('forward') ? 1 : 0) -
-        (this.fpsKeysPressed.has('backward') ? 1 : 0);
+        (this.fpsKeysPressed.has('backward') ? 1 : 0) +
+        this.fpsDragMoveInput.y;
     const strafe =
         (this.fpsKeysPressed.has('right') ? 1 : 0) -
-        (this.fpsKeysPressed.has('left') ? 1 : 0);
+        (this.fpsKeysPressed.has('left') ? 1 : 0) +
+        this.fpsDragMoveInput.x;
     const vertical =
         (this.fpsKeysPressed.has('up') ? 1 : 0) -
         (this.fpsKeysPressed.has('down') ? 1 : 0);
+
+    this.fpsDragMoveInput.set(0, 0);
 
     this.goalFpsMove.set(strafe, vertical, -forward);
     this.fpsSmoothedMove.x = this.fpsMoveXDamper.update(
@@ -331,6 +338,8 @@ export class SmoothControls extends EventDispatcher<{
 
     this.fpsKeysPressed.clear();
     this.fpsActivePointerId = null;
+    this.fpsActiveMouseButton = null;
+    this.fpsDragMoveInput.set(0, 0);
     this.goalFpsMove.set(0, 0, 0);
     this.fpsSmoothedMove.set(0, 0, 0);
     this.resetFpsDampers();
@@ -400,6 +409,8 @@ export class SmoothControls extends EventDispatcher<{
       this.panPerPixel = 0;
       this.fpsKeysPressed.clear();
       this.fpsActivePointerId = null;
+      this.fpsActiveMouseButton = null;
+      this.fpsDragMoveInput.set(0, 0);
 
       if (this.isUserPointing) {
         this.isUserPointing = false;
@@ -461,6 +472,7 @@ export class SmoothControls extends EventDispatcher<{
     element.focus();
 
     this.fpsActivePointerId = event.pointerId;
+    this.fpsActiveMouseButton = event.pointerType === 'mouse' ? event.button : null;
     this.fpsPointerPosition.x = event.clientX;
     this.fpsPointerPosition.y = event.clientY;
     this.startPointerPosition.clientX = event.clientX;
@@ -507,6 +519,14 @@ export class SmoothControls extends EventDispatcher<{
 
     this.changeSource = ChangeSource.USER_INTERACTION;
 
+    if (this.fpsActiveMouseButton === 2) {
+      this.fpsDragMoveInput.x = clamp(
+          this.fpsDragMoveInput.x + dx * FPS_DRAG_MOVE_SENSITIVITY, -1, 1);
+      this.fpsDragMoveInput.y = clamp(
+          this.fpsDragMoveInput.y - dy * FPS_DRAG_MOVE_SENSITIVITY, -1, 1);
+      return;
+    }
+
     const lookSensitivity =
         FPS_LOOK_SENSITIVITY * this.orbitSensitivity * this.inputSensitivity;
     this.goalFpsYaw -= dx * lookSensitivity;
@@ -522,11 +542,14 @@ export class SmoothControls extends EventDispatcher<{
     }
 
     const {element} = this;
+    const fpsActiveMouseButton = this.fpsActiveMouseButton;
     this.fpsActivePointerId = null;
+    this.fpsActiveMouseButton = null;
+    this.fpsDragMoveInput.set(0, 0);
     element.removeEventListener('pointermove', this.onPointerMove);
     element.removeEventListener('pointerup', this.onPointerUp);
 
-    if (this.enablePan && this.enableTap) {
+    if (fpsActiveMouseButton !== 2 && this.enablePan && this.enableTap) {
       this.recenterFromViewCenter(event);
     }
 
