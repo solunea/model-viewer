@@ -706,8 +706,12 @@ declare class ModelScene extends Scene$1 {
      * to playing the first animation.
      */
     playAnimation(name?: string | null, crossfadeTime?: number, loopMode?: AnimationActionLoopStyles, repetitionCount?: number): void;
-    appendAnimation(name?: string, loopMode?: AnimationActionLoopStyles, repetitionCount?: number, weight?: number, timeScale?: number, fade?: boolean | number, warp?: boolean | number, relativeWarp?: boolean, time?: null | number, needsToStop?: boolean): void;
-    detachAnimation(name?: string, fade?: boolean | number): void;
+    appendAnimation(name?: string, loopMode?: AnimationActionLoopStyles, repetitionCount?: number, weight?: number, timeScale?: number, fade?: boolean | number | string, warp?: boolean | number | string, relativeWarp?: boolean, time?: null | number | string, needsToStop?: boolean): void;
+    /**
+     * Helper function to parse fade parameter values
+     */
+    private parseFadeValue;
+    detachAnimation(name?: string, fade?: boolean | number | string): void;
     updateAnimationLoop(name?: string, loopMode?: AnimationActionLoopStyles, repetitionCount?: number): void;
     stopAnimation(): void;
     updateAnimation(step: number): void;
@@ -926,7 +930,8 @@ declare class ARRenderer extends EventDispatcher<{
     private dispatchCameraChangeEvent;
     private updateXRControllerHover;
     /**
-     * Enable user interaction for world-space mode after initial automatic placement
+     * Enable user interaction for world-space mode after initial automatic
+     * placement
      */
     private enableWorldSpaceUserInteraction;
     private handleFirstView;
@@ -935,18 +940,20 @@ declare class ARRenderer extends EventDispatcher<{
      */
     onWebXRFrame(time: number, frame: XRFrame): void;
     /**
-    * Calculate optimal scale and position for world-space AR presentation
-    * Similar to the SVXR:FrameModel approach for consistent model presentation
-    *
-    * This method implements automatic model framing for world-space AR sessions:
-    * 1. Calculates optimal viewing distance based on model size and minimum distance
-    * 2. Positions model at a drop angle below camera center for natural viewing
-    * 3. Automatically scales model to fit within viewport constraints
-    * 4. Ensures consistent presentation across different model sizes
-    *
-    * Note: This automatic placement only happens on the first session start.
-    * After initial placement, users have full control over model position, rotation, and scale.
-    */
+     * Calculate optimal scale and position for world-space AR presentation
+     * Similar to the SVXR:FrameModel approach for consistent model presentation
+     *
+     * This method implements automatic model framing for world-space AR sessions:
+     * 1. Calculates optimal viewing distance based on model size and minimum
+     * distance
+     * 2. Positions model at a drop angle below camera center for natural viewing
+     * 3. Automatically scales model to fit within viewport constraints
+     * 4. Ensures consistent presentation across different model sizes
+     *
+     * Note: This automatic placement only happens on the first session start.
+     * After initial placement, users have full control over model position,
+     * rotation, and scale.
+     */
     private calculateWorldSpaceOptimalPlacement;
     /**
      * Calculate min/max scale for world-space AR, SVXR-style

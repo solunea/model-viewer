@@ -1,6 +1,3 @@
-import { BlendFunction, EffectComposer as EffectComposer$1, Pass, RenderPass, NormalPass, Selection, EffectPass, Effect, BlendMode as BlendMode$1, BloomEffect, ToneMappingMode as ToneMappingMode$1, ChromaticAberrationEffect, GlitchEffect, OutlineEffect, SMAAPreset, SSAOEffect, SelectiveBloomEffect } from 'postprocessing';
-import * as lit from 'lit';
-import { ReactiveElement, LitElement } from 'lit';
 import * as three from 'three';
 import { Camera, ToneMapping, WebGLRenderer, Object3D, ColorRepresentation } from 'three';
 import * as _solunea_model_viewer_lib_model_viewer_base_js from '@solunea/model-viewer/lib/model-viewer-base.js';
@@ -14,6 +11,9 @@ import * as _solunea_model_viewer_lib_features_scene_graph_js from '@solunea/mod
 import * as _solunea_model_viewer_lib_features_annotation_js from '@solunea/model-viewer/lib/features/annotation.js';
 import { ModelViewerElement } from '@solunea/model-viewer';
 import { ModelScene } from '@solunea/model-viewer/lib/three-components/ModelScene.js';
+import * as lit from 'lit';
+import { LitElement, ReactiveElement } from 'lit';
+import { BlendFunction, Effect, BlendMode as BlendMode$1, EffectComposer as EffectComposer$1, Pass, RenderPass, NormalPass, Selection, EffectPass, BloomEffect, ToneMappingMode as ToneMappingMode$1, ChromaticAberrationEffect, GlitchEffect, OutlineEffect, SelectiveBloomEffect, SMAAPreset, SSAOEffect } from 'postprocessing';
 
 type Constructor<T = object, U = object> = {
     new (...args: any[]): T;
@@ -27,6 +27,43 @@ interface IBlendModeMixin {
     blendMode: BlendMode;
     [$setDefaultProperties](): void;
 }
+
+declare const $updateProperties$1: unique symbol;
+declare const $effectOptions: unique symbol;
+interface IMVBlendMode extends BlendMode$1 {
+    defaultBlendFunction?: BlendFunction;
+}
+interface IntegrationOptions {
+    /**
+     * Enable this if effect uses the built-in {@link NormalPass}
+     */
+    requireNormals?: boolean;
+    /**
+     * Enable this if the effect requires a render frame every frame.
+     * @warning Significant performance impact from enabling this
+     */
+    requireDirtyRender?: boolean;
+}
+interface IMVEffect extends Effect, IntegrationOptions {
+    readonly blendMode: IMVBlendMode;
+    /**
+     * Enable this if the effect doesn't play well when used with other effects.
+     */
+    requireSeparatePass?: boolean;
+    disabled?: boolean;
+}
+interface IEffectBaseMixin {
+    effects: IMVEffect[];
+    effectComposer: MVEffectComposer;
+}
+declare const MVEffectBase: {
+    new (...args: any[]): IBlendModeMixin;
+    prototype: IBlendModeMixin;
+} & object & {
+    new (...args: any[]): IEffectBaseMixin;
+    prototype: IEffectBaseMixin;
+} & typeof LitElement;
+type MVEffectBase = InstanceType<typeof MVEffectBase>;
 
 declare const $scene: unique symbol;
 declare const $composer: unique symbol;
@@ -42,7 +79,7 @@ declare const $onSceneLoad: unique symbol;
 declare const $resetEffectPasses: unique symbol;
 declare const $userEffectCount: unique symbol;
 declare const $tonemapping: unique symbol;
-declare const $updateProperties$1: unique symbol;
+declare const $updateProperties: unique symbol;
 /**
  * Light wrapper around {@link EffectComposer} for storing the `scene` and
  * `camera at a top level, and setting them for every {@link Pass} added.
@@ -178,47 +215,10 @@ declare class MVEffectComposer extends ReactiveElement {
      */
     get [$effectPasses](): EffectPass[];
     [$onSceneLoad]: () => void;
-    [$updateProperties$1](): void;
+    [$updateProperties](): void;
     [$requires](property: 'requireNormals' | 'requireSeparatePass' | 'requireDirtyRender'): boolean;
     [$resetEffectPasses](): void;
 }
-
-declare const $updateProperties: unique symbol;
-declare const $effectOptions: unique symbol;
-interface IMVBlendMode extends BlendMode$1 {
-    defaultBlendFunction?: BlendFunction;
-}
-interface IntegrationOptions {
-    /**
-     * Enable this if effect uses the built-in {@link NormalPass}
-     */
-    requireNormals?: boolean;
-    /**
-     * Enable this if the effect requires a render frame every frame.
-     * @warning Significant performance impact from enabling this
-     */
-    requireDirtyRender?: boolean;
-}
-interface IMVEffect extends Effect, IntegrationOptions {
-    readonly blendMode: IMVBlendMode;
-    /**
-     * Enable this if the effect doesn't play well when used with other effects.
-     */
-    requireSeparatePass?: boolean;
-    disabled?: boolean;
-}
-interface IEffectBaseMixin {
-    effects: IMVEffect[];
-    effectComposer: MVEffectComposer;
-}
-declare const MVEffectBase: {
-    new (...args: any[]): IBlendModeMixin;
-    prototype: IBlendModeMixin;
-} & object & {
-    new (...args: any[]): IEffectBaseMixin;
-    prototype: IEffectBaseMixin;
-} & typeof LitElement;
-type MVEffectBase = InstanceType<typeof MVEffectBase>;
 
 declare class MVBloomEffect extends MVEffectBase {
     static get is(): string;
@@ -227,7 +227,8 @@ declare class MVBloomEffect extends MVEffectBase {
      */
     strength: number;
     /**
-     * Value in the range of (0, 1). Pixels with a brightness above this will bloom.
+     * Value in the range of (0, 1). Pixels with a brightness above this will
+     * bloom.
      */
     threshold: number;
     /**
@@ -241,7 +242,7 @@ declare class MVBloomEffect extends MVEffectBase {
     constructor();
     connectedCallback(): void;
     updated(changedProperties: Map<string | number | symbol, any>): void;
-    [$updateProperties](): void;
+    [$updateProperties$1](): void;
     get [$effectOptions](): ConstructorParameters<typeof BloomEffect>[0];
 }
 
@@ -276,7 +277,7 @@ declare class MVColorGradeEffect extends MVEffectBase {
     constructor();
     connectedCallback(): void;
     updated(changedProperties: Map<string | number | symbol, any>): void;
-    [$updateProperties](): void;
+    [$updateProperties$1](): void;
 }
 
 declare const GLITCH_MODES: readonly ["sporadic", "constant"];
@@ -295,7 +296,7 @@ declare class MVGlitchEffect extends MVEffectBase {
     constructor();
     connectedCallback(): void;
     updated(changedProperties: Map<string | number | symbol, any>): void;
-    [$updateProperties](): void;
+    [$updateProperties$1](): void;
     [$effectOptions](chromaticAberrationEffect: ChromaticAberrationEffect): ConstructorParameters<typeof GlitchEffect>[0];
 }
 
@@ -334,7 +335,7 @@ declare class MVOutlineEffect extends MVOutlineEffect_base {
     constructor();
     connectedCallback(): void;
     updated(changedProperties: Map<string | number | symbol, any>): void;
-    [$updateProperties](): void;
+    [$updateProperties$1](): void;
     get [$effectOptions](): ConstructorParameters<typeof OutlineEffect>[2];
 }
 
@@ -348,35 +349,7 @@ declare class MVPixelateEffect extends MVEffectBase {
     constructor();
     connectedCallback(): void;
     updated(changedProperties: Map<string | number | symbol, any>): void;
-    [$updateProperties](): void;
-}
-
-type SMAAQuality = keyof typeof SMAAPreset;
-declare class MVSMAAEffect extends MVEffectBase {
-    static get is(): string;
-    /**
-     * `low | medium | high | ultra`
-     * @default 'medium'
-     */
-    quality: SMAAQuality;
-    constructor();
-    connectedCallback(): void;
-    updated(changedProperties: Map<string | number | symbol, any>): void;
-    [$updateProperties](): void;
-}
-
-declare class MVSSAOEffect extends MVEffectBase {
-    static get is(): string;
-    /**
-     * The strength of the shadow occlusions. Higher value means darker shadows.
-     */
-    strength: number;
-    constructor();
-    connectedCallback(): void;
-    update(changedProperties: Map<string | number | symbol, any>): void;
-    [$updateProperties](): void;
-    [$setDefaultProperties](): void;
-    get [$effectOptions](): ConstructorParameters<typeof SSAOEffect>[2];
+    [$updateProperties$1](): void;
 }
 
 declare const MVSelectiveBloomEffect_base: {
@@ -396,7 +369,8 @@ declare class MVSelectiveBloomEffect extends MVSelectiveBloomEffect_base {
      */
     strength: number;
     /**
-     * Value in the range of (0, 1). Pixels with a brightness above this will bloom.
+     * Value in the range of (0, 1). Pixels with a brightness above this will
+     * bloom.
      */
     threshold: number;
     /**
@@ -410,8 +384,36 @@ declare class MVSelectiveBloomEffect extends MVSelectiveBloomEffect_base {
     constructor();
     connectedCallback(): void;
     updated(changedProperties: Map<string | number | symbol, any>): void;
-    [$updateProperties](): void;
+    [$updateProperties$1](): void;
     get [$effectOptions](): ConstructorParameters<typeof SelectiveBloomEffect>[2];
+}
+
+type SMAAQuality = keyof typeof SMAAPreset;
+declare class MVSMAAEffect extends MVEffectBase {
+    static get is(): string;
+    /**
+     * `low | medium | high | ultra`
+     * @default 'medium'
+     */
+    quality: SMAAQuality;
+    constructor();
+    connectedCallback(): void;
+    updated(changedProperties: Map<string | number | symbol, any>): void;
+    [$updateProperties$1](): void;
+}
+
+declare class MVSSAOEffect extends MVEffectBase {
+    static get is(): string;
+    /**
+     * The strength of the shadow occlusions. Higher value means darker shadows.
+     */
+    strength: number;
+    constructor();
+    connectedCallback(): void;
+    update(changedProperties: Map<string | number | symbol, any>): void;
+    [$updateProperties$1](): void;
+    [$setDefaultProperties](): void;
+    get [$effectOptions](): ConstructorParameters<typeof SSAOEffect>[2];
 }
 
 declare global {
