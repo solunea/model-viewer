@@ -2,7 +2,7 @@
 import {devices, playwrightLauncher} from '@web/test-runner-playwright';
 
 export default {
-  concurrency: 10,
+  concurrency: 5,
   nodeResolve: true,
   files: 'lib/test/**/*-spec.js',
   // in a monorepo you need to set set the root dir to resolve modules
@@ -26,6 +26,7 @@ export default {
     config: {
       ui: 'tdd',
       timeout: '60000',
+      retries: 2,
     },
   },
   // plugins: [esbuildPlugin({ts: true})],

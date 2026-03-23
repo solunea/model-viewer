@@ -23,7 +23,9 @@ import {Camera, HalfFloatType, NeutralToneMapping, ToneMapping, UnsignedByteType
 const DUMMY_RENDERER = {
   getDrawingBufferSize: (v: Vector2) => v.set(1, 1),
   getSize: (v: Vector2) => v.set(1, 1),
-  getContext: () => ({ getContextAttributes: () => ({ alpha: true }) }),
+  getContext: () => ({getContextAttributes: () => ({alpha: true})}),
+  outputColorSpace: 'srgb',
+  autoClear: false,
 } as unknown as WebGLRenderer;
 
 import {IMVEffect, IntegrationOptions, MVEffectBase} from './effects/mixins/effect-base.js';
@@ -232,10 +234,10 @@ export class MVEffectComposer extends ReactiveElement {
           (e as Error).message + '\nrenderMode defaulting to: performance');
     }
     const rendererInfo = getOwnPropertySymbolValue<Renderer>(
-      this.modelViewerElement, 'renderer');
+        this.modelViewerElement, 'renderer');
     const threeRenderer = rendererInfo && rendererInfo.threeRenderer ?
-      rendererInfo.threeRenderer :
-      DUMMY_RENDERER;
+        rendererInfo.threeRenderer :
+        DUMMY_RENDERER;
 
     this[$composer] = new EffectComposer(threeRenderer, {
       stencilBuffer: true,
