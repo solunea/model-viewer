@@ -217,11 +217,20 @@ suite('SmoothControls', () => {
         controls.mode = ControlMode.FPS;
 
         let pointerLockRequested = false;
+        let pointerLockReleased = false;
         const originalRequestPointerLock = element.requestPointerLock;
+        const originalExitPointerLock = document.exitPointerLock;
+        const originalPointerLockElement =
+            Object.getOwnPropertyDescriptor(document, 'pointerLockElement');
         element.requestPointerLock = () => {
           pointerLockRequested = true;
           return Promise.resolve();
         };
+        document.exitPointerLock = () => {
+          pointerLockReleased = true;
+        };
+        Object.defineProperty(
+            document, 'pointerLockElement', {configurable: true, get: () => element});
 
         element.dispatchEvent(new PointerEvent('pointerdown', {
           pointerId: 32,
@@ -239,6 +248,48 @@ suite('SmoothControls', () => {
           clientY: 20
         }));
         element.requestPointerLock = originalRequestPointerLock;
+        document.exitPointerLock = originalExitPointerLock;
+        if (originalPointerLockElement != null) {
+          Object.defineProperty(
+              document, 'pointerLockElement', originalPointerLockElement);
+        }
+
+        expect(pointerLockReleased).to.be.true;
+      });
+
+      test('releases mouse pointer lock from document mouseup', () => {
+        controls.mode = ControlMode.FPS;
+
+        let pointerLockReleased = false;
+        const originalRequestPointerLock = element.requestPointerLock;
+        const originalExitPointerLock = document.exitPointerLock;
+        const originalPointerLockElement =
+            Object.getOwnPropertyDescriptor(document, 'pointerLockElement');
+        element.requestPointerLock = () => Promise.resolve();
+        document.exitPointerLock = () => {
+          pointerLockReleased = true;
+        };
+        Object.defineProperty(
+            document, 'pointerLockElement', {configurable: true, get: () => element});
+
+        element.dispatchEvent(new PointerEvent('pointerdown', {
+          pointerId: 33,
+          pointerType: 'mouse',
+          clientX: 20,
+          clientY: 20
+        }));
+        document.dispatchEvent(new MouseEvent('mouseup', {
+          clientX: 20,
+          clientY: 20
+        }));
+        element.requestPointerLock = originalRequestPointerLock;
+        document.exitPointerLock = originalExitPointerLock;
+        if (originalPointerLockElement != null) {
+          Object.defineProperty(
+              document, 'pointerLockElement', originalPointerLockElement);
+        }
+
+        expect(pointerLockReleased).to.be.true;
       });
 
       test('maps right click drag to movement instead of look', () => {

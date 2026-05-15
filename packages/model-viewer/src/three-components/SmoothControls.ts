@@ -347,6 +347,7 @@ export class SmoothControls extends EventDispatcher<{
 
     this.element.removeEventListener('pointermove', this.onPointerMove);
     this.element.removeEventListener('pointerup', this.onPointerUp);
+    document.removeEventListener('mouseup', this.onFpsDocumentMouseUp);
     this.element.removeEventListener('touchmove', this.disableScroll);
 
     if (this.isUserPointing) {
@@ -413,6 +414,7 @@ export class SmoothControls extends EventDispatcher<{
       this.fpsActiveMouseButton = null;
       this.fpsDragMoveInput.set(0, 0);
       this.releaseFpsPointerLock();
+      document.removeEventListener('mouseup', this.onFpsDocumentMouseUp);
 
       if (this.isUserPointing) {
         this.isUserPointing = false;
@@ -485,6 +487,7 @@ export class SmoothControls extends EventDispatcher<{
     element.addEventListener('pointermove', this.onPointerMove);
     element.addEventListener('pointerup', this.onPointerUp);
     if (event.pointerType === 'mouse') {
+      document.addEventListener('mouseup', this.onFpsDocumentMouseUp);
       element.requestPointerLock?.();
     }
     try {
@@ -546,6 +549,18 @@ export class SmoothControls extends EventDispatcher<{
       return;
     }
 
+    this.endFpsPointerInteraction(event);
+  }
+
+  private onFpsDocumentMouseUp = (event: MouseEvent) => {
+    if (this.fpsActivePointerId == null) {
+      return;
+    }
+
+    this.endFpsPointerInteraction(event);
+  };
+
+  private endFpsPointerInteraction(event: MouseEvent) {
     const {element} = this;
     const fpsActiveMouseButton = this.fpsActiveMouseButton;
     this.fpsActivePointerId = null;
@@ -554,6 +569,7 @@ export class SmoothControls extends EventDispatcher<{
     this.releaseFpsPointerLock();
     element.removeEventListener('pointermove', this.onPointerMove);
     element.removeEventListener('pointerup', this.onPointerUp);
+    document.removeEventListener('mouseup', this.onFpsDocumentMouseUp);
 
     if (fpsActiveMouseButton !== 2 && this.enablePan && this.enableTap) {
       this.recenterFromViewCenter(event);
@@ -573,7 +589,7 @@ export class SmoothControls extends EventDispatcher<{
     }
   }
 
-  private recenterFromViewCenter(pointer: PointerEvent) {
+  private recenterFromViewCenter(pointer: {clientX: number, clientY: number}) {
     if (performance.now() > this.startTime + TAP_MS ||
         Math.abs(pointer.clientX - this.startPointerPosition.clientX) >
             TAP_DISTANCE ||
