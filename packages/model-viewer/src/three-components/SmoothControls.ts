@@ -343,11 +343,9 @@ export class SmoothControls extends EventDispatcher<{
     this.goalFpsMove.set(0, 0, 0);
     this.fpsSmoothedMove.set(0, 0, 0);
     this.resetFpsDampers();
-    this.releaseFpsPointerLock();
 
     this.element.removeEventListener('pointermove', this.onPointerMove);
     this.element.removeEventListener('pointerup', this.onPointerUp);
-    this.removeFpsPointerEndListeners();
     this.element.removeEventListener('touchmove', this.disableScroll);
 
     if (this.isUserPointing) {
@@ -413,8 +411,6 @@ export class SmoothControls extends EventDispatcher<{
       this.fpsActivePointerId = null;
       this.fpsActiveMouseButton = null;
       this.fpsDragMoveInput.set(0, 0);
-      this.releaseFpsPointerLock();
-      this.removeFpsPointerEndListeners();
 
       if (this.isUserPointing) {
         this.isUserPointing = false;
@@ -486,17 +482,6 @@ export class SmoothControls extends EventDispatcher<{
 
     element.addEventListener('pointermove', this.onPointerMove);
     element.addEventListener('pointerup', this.onPointerUp);
-    if (event.pointerType === 'mouse') {
-      this.addFpsPointerEndListeners();
-      const pointerLockRequest = element.requestPointerLock?.();
-      if (pointerLockRequest != null) {
-        pointerLockRequest.then(() => {
-          if (this.fpsActivePointerId == null) {
-            this.releaseFpsPointerLock();
-          }
-        }).catch(() => {});
-      }
-    }
     try {
       element.setPointerCapture(event.pointerId);
     } catch {
@@ -564,38 +549,14 @@ export class SmoothControls extends EventDispatcher<{
     this.endFpsPointerInteraction(event);
   }
 
-  private onFpsPointerEnd = (event: MouseEvent) => {
-    if (this.fpsActivePointerId == null) {
-      return;
-    }
-
-    this.endFpsPointerInteraction(event);
-  };
-
-  private addFpsPointerEndListeners() {
-    document.addEventListener('mouseup', this.onFpsPointerEnd, true);
-    document.addEventListener('pointerup', this.onFpsPointerEnd, true);
-    window.addEventListener('mouseup', this.onFpsPointerEnd, true);
-    window.addEventListener('pointerup', this.onFpsPointerEnd, true);
-  }
-
-  private removeFpsPointerEndListeners() {
-    document.removeEventListener('mouseup', this.onFpsPointerEnd, true);
-    document.removeEventListener('pointerup', this.onFpsPointerEnd, true);
-    window.removeEventListener('mouseup', this.onFpsPointerEnd, true);
-    window.removeEventListener('pointerup', this.onFpsPointerEnd, true);
-  }
-
   private endFpsPointerInteraction(event: MouseEvent) {
     const {element} = this;
     const fpsActiveMouseButton = this.fpsActiveMouseButton;
     this.fpsActivePointerId = null;
     this.fpsActiveMouseButton = null;
     this.fpsDragMoveInput.set(0, 0);
-    this.releaseFpsPointerLock();
     element.removeEventListener('pointermove', this.onPointerMove);
     element.removeEventListener('pointerup', this.onPointerUp);
-    this.removeFpsPointerEndListeners();
 
     if (fpsActiveMouseButton !== 2 && this.enablePan && this.enableTap) {
       this.recenterFromViewCenter(event);
@@ -607,12 +568,6 @@ export class SmoothControls extends EventDispatcher<{
     }
 
     element.style.cursor = 'grab';
-  }
-
-  private releaseFpsPointerLock() {
-    if (document.pointerLockElement != null) {
-      document.exitPointerLock();
-    }
   }
 
   private recenterFromViewCenter(pointer: {clientX: number, clientY: number}) {
