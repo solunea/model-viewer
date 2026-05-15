@@ -292,6 +292,50 @@ suite('SmoothControls', () => {
         expect(pointerLockReleased).to.be.true;
       });
 
+      test('releases mouse pointer lock if it resolves after pointerup', async () => {
+        controls.mode = ControlMode.FPS;
+
+        let resolvePointerLock!: () => void;
+        let pointerLockReleased = false;
+        const originalRequestPointerLock = element.requestPointerLock;
+        const originalExitPointerLock = document.exitPointerLock;
+        const originalPointerLockElement =
+            Object.getOwnPropertyDescriptor(document, 'pointerLockElement');
+        element.requestPointerLock = () => new Promise<void>((resolve) => {
+          resolvePointerLock = resolve;
+        });
+        document.exitPointerLock = () => {
+          pointerLockReleased = true;
+        };
+        Object.defineProperty(
+            document, 'pointerLockElement', {configurable: true, get: () => element});
+
+        element.dispatchEvent(new PointerEvent('pointerdown', {
+          pointerId: 34,
+          pointerType: 'mouse',
+          clientX: 20,
+          clientY: 20
+        }));
+        element.dispatchEvent(new PointerEvent('pointerup', {
+          pointerId: 34,
+          pointerType: 'mouse',
+          clientX: 20,
+          clientY: 20
+        }));
+
+        resolvePointerLock();
+        await Promise.resolve();
+
+        element.requestPointerLock = originalRequestPointerLock;
+        document.exitPointerLock = originalExitPointerLock;
+        if (originalPointerLockElement != null) {
+          Object.defineProperty(
+              document, 'pointerLockElement', originalPointerLockElement);
+        }
+
+        expect(pointerLockReleased).to.be.true;
+      });
+
       test('maps right click drag to movement instead of look', () => {
         controls.mode = ControlMode.FPS;
 

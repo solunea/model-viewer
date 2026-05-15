@@ -488,7 +488,14 @@ export class SmoothControls extends EventDispatcher<{
     element.addEventListener('pointerup', this.onPointerUp);
     if (event.pointerType === 'mouse') {
       document.addEventListener('mouseup', this.onFpsDocumentMouseUp);
-      element.requestPointerLock?.();
+      const pointerLockRequest = element.requestPointerLock?.();
+      if (pointerLockRequest != null) {
+        pointerLockRequest.then(() => {
+          if (this.fpsActivePointerId == null) {
+            this.releaseFpsPointerLock();
+          }
+        }).catch(() => {});
+      }
     }
     try {
       element.setPointerCapture(event.pointerId);
