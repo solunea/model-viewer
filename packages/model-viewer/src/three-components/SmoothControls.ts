@@ -343,6 +343,7 @@ export class SmoothControls extends EventDispatcher<{
     this.goalFpsMove.set(0, 0, 0);
     this.fpsSmoothedMove.set(0, 0, 0);
     this.resetFpsDampers();
+    this.releaseFpsPointerLock();
 
     this.element.removeEventListener('pointermove', this.onPointerMove);
     this.element.removeEventListener('pointerup', this.onPointerUp);
@@ -411,6 +412,7 @@ export class SmoothControls extends EventDispatcher<{
       this.fpsActivePointerId = null;
       this.fpsActiveMouseButton = null;
       this.fpsDragMoveInput.set(0, 0);
+      this.releaseFpsPointerLock();
 
       if (this.isUserPointing) {
         this.isUserPointing = false;
@@ -482,6 +484,9 @@ export class SmoothControls extends EventDispatcher<{
 
     element.addEventListener('pointermove', this.onPointerMove);
     element.addEventListener('pointerup', this.onPointerUp);
+    if (event.pointerType === 'mouse') {
+      element.requestPointerLock?.();
+    }
     try {
       element.setPointerCapture(event.pointerId);
     } catch {
@@ -546,6 +551,7 @@ export class SmoothControls extends EventDispatcher<{
     this.fpsActivePointerId = null;
     this.fpsActiveMouseButton = null;
     this.fpsDragMoveInput.set(0, 0);
+    this.releaseFpsPointerLock();
     element.removeEventListener('pointermove', this.onPointerMove);
     element.removeEventListener('pointerup', this.onPointerUp);
 
@@ -559,6 +565,12 @@ export class SmoothControls extends EventDispatcher<{
     }
 
     element.style.cursor = 'grab';
+  }
+
+  private releaseFpsPointerLock() {
+    if (document.pointerLockElement === this.element) {
+      document.exitPointerLock();
+    }
   }
 
   private recenterFromViewCenter(pointer: PointerEvent) {

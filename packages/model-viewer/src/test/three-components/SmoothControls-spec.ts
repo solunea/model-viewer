@@ -213,6 +213,34 @@ suite('SmoothControls', () => {
         expect(element.style.cursor).to.be.equal('grab');
       });
 
+      test('locks the mouse pointer while dragging', () => {
+        controls.mode = ControlMode.FPS;
+
+        let pointerLockRequested = false;
+        const originalRequestPointerLock = element.requestPointerLock;
+        element.requestPointerLock = () => {
+          pointerLockRequested = true;
+          return Promise.resolve();
+        };
+
+        element.dispatchEvent(new PointerEvent('pointerdown', {
+          pointerId: 32,
+          pointerType: 'mouse',
+          clientX: 20,
+          clientY: 20
+        }));
+
+        expect(pointerLockRequested).to.be.true;
+
+        element.dispatchEvent(new PointerEvent('pointerup', {
+          pointerId: 32,
+          pointerType: 'mouse',
+          clientX: 20,
+          clientY: 20
+        }));
+        element.requestPointerLock = originalRequestPointerLock;
+      });
+
       test('maps right click drag to movement instead of look', () => {
         controls.mode = ControlMode.FPS;
 
