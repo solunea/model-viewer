@@ -101,6 +101,17 @@ suite('ModelScene', () => {
       expect(shadow.phi).to.be.lessThan(Math.PI / 2);
     });
 
+    test('marks the PCSS shadow map dirty while interpolating orbit', () => {
+      scene.setShadowInterpolationDecay(200);
+      scene.setShadowOrbit(0, Math.PI / 2);
+
+      const shadow = scene.shadow! as any;
+      shadow.light.shadow.needsUpdate = false;
+      shadow.update(16);
+
+      expect(shadow.light.shadow.needsUpdate).to.be.true;
+    });
+
     test('changes shadow orbit immediately by default', () => {
       scene.setShadowOrbit(0, Math.PI / 2);
 

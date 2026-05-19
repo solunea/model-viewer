@@ -669,6 +669,7 @@ export class Shadow extends Object3D {
 
     this.light.position.set(lx, ly, lz);
     this.light.target.position.copy(_center);
+    this.light.updateMatrixWorld();
     this.light.target.updateMatrixWorld();
 
     const halfSize = this.maxDimension * 3;
@@ -681,6 +682,7 @@ export class Shadow extends Object3D {
     this.light.shadow.camera.bottom = -halfSize;
     this.light.shadow.camera.far = radius * 20;
     this.light.shadow.camera.updateProjectionMatrix();
+    this.light.shadow.needsUpdate = true;
 
     if (newFrustumWidth !== this.frustumWidth || newNearPlane !== this.nearPlane) {
       this.frustumWidth = newFrustumWidth;
