@@ -1122,6 +1122,9 @@ export class ModelScene extends Scene {
             parts.length > 1 && parts[1] !== 'auto' ? parseFloat(parts[1]) : 0;
         const theta = (isNaN(thetaDeg) ? 0 : thetaDeg) * Math.PI / 180;
         const phi = (isNaN(phiDeg) ? 0 : phiDeg) * Math.PI / 180;
+        if (this.element.shadowInterpolationDecay > 0 && phi !== 0) {
+          this.shadow.setOrbit(0, 0);
+        }
         this.shadow.setOrbit(theta, phi);
       }
     }

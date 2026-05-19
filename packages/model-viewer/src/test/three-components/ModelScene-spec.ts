@@ -112,6 +112,22 @@ suite('ModelScene', () => {
       expect(shadow.light.shadow.needsUpdate).to.be.true;
     });
 
+    test('interpolates initial shadow orbit when decay is already set', () => {
+      scene.shadow!.dispose();
+      scene.shadow = null;
+
+      element.shadowInterpolationDecay = 200;
+      element.shadowOrbit = '0deg 90deg';
+      scene.setShadowIntensity(1);
+
+      const shadow = scene.shadow! as any;
+      expect(shadow.phi).to.be.equal(0);
+
+      shadow.update(16);
+      expect(shadow.phi).to.be.greaterThan(0);
+      expect(shadow.phi).to.be.lessThan(Math.PI / 2);
+    });
+
     test('changes shadow orbit immediately by default', () => {
       scene.setShadowOrbit(0, Math.PI / 2);
 
