@@ -494,6 +494,9 @@ declare class Shadow extends Object3D {
     private phi;
     private goalTheta;
     private goalPhi;
+    private interpolationDecay;
+    private thetaDamper;
+    private phiDamper;
     needsUpdate: boolean;
     private basicCamera;
     private renderTarget;
@@ -512,7 +515,8 @@ declare class Shadow extends Object3D {
     private disposeMode;
     setScene(scene: ModelScene, softness: number, side: Side): void;
     setOrbit(theta: number, phi: number): void;
-    update(_delta: number): boolean;
+    update(delta: number): boolean;
+    setInterpolationDecay(decayMilliseconds: number): void;
     setSoftness(softness: number): void;
     setIntensity(intensity: number): void;
     getIntensity(): number;
@@ -738,6 +742,10 @@ declare class ModelScene extends Scene$1 {
      * theta = azimuth angle around Y axis, phi = polar angle from Y axis.
      */
     setShadowOrbit(theta: number, phi: number): void;
+    /**
+     * Sets the decay time of shadow orbit transitions.
+     */
+    setShadowInterpolationDecay(decayMilliseconds: number): void;
     /**
      * Shift the floor vertically from the bottom of the model's bounding box
      * by offset (should generally be negative).
@@ -1593,6 +1601,7 @@ declare interface EnvironmentInterface {
     shadowIntensity: number;
     shadowSoftness: number;
     shadowOrbit: string;
+    shadowInterpolationDecay: number;
     exposure: number;
     hasBakedShadow(): boolean;
 }

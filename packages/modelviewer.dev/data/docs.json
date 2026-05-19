@@ -938,6 +938,18 @@
           "default": "1",
           "options": "any value between 0 and 1"
         }
+      },
+      {
+        "name": "shadow-interpolation-decay",
+        "htmlName": "shadowInterpolationDecay",
+        "description": "Controls the decay time in milliseconds for transitions between shadow-orbit values. Set to 0 to change the shadow orbit immediately.",
+        "links": [
+          "<a href=\"../examples/lightingandenv/#shadows\"><span class='attribute'>shadow-interpolation-decay</span> example</a>"
+        ],
+        "default": {
+          "default": "0",
+          "options": "any non-negative value"
+        }
       }
     ],
     "Methods": [

@@ -83,6 +83,31 @@ suite('ModelScene', () => {
     });
   });
 
+  suite('shadow orbit interpolation', () => {
+    setup(async () => {
+      await scene.setSource(assetPath('models/soldier.glb'));
+      scene.setShadowIntensity(1);
+    });
+
+    test('interpolates shadow orbit when decay is set', () => {
+      scene.setShadowInterpolationDecay(200);
+      scene.setShadowOrbit(0, Math.PI / 2);
+
+      const shadow = scene.shadow! as any;
+      expect(shadow.phi).to.be.equal(0);
+
+      shadow.update(16);
+      expect(shadow.phi).to.be.greaterThan(0);
+      expect(shadow.phi).to.be.lessThan(Math.PI / 2);
+    });
+
+    test('changes shadow orbit immediately by default', () => {
+      scene.setShadowOrbit(0, Math.PI / 2);
+
+      expect((scene.shadow! as any).phi).to.be.equal(Math.PI / 2);
+    });
+  });
+
   suite('setSize', () => {
     test('updates visual and buffer size', () => {
       scene.setSize(500, 200);

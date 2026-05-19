@@ -1111,12 +1111,15 @@ export class ModelScene extends Scene {
     if (this.shadow == null) {
       const side = this.element.arPlacement === 'wall' ? 'back' : 'bottom';
       this.shadow = new Shadow(this, this.shadowSoftness, side);
-      
+      this.shadow.setInterpolationDecay(this.element.shadowInterpolationDecay);
+
       // Apply the initial shadow orbit from the element if it exists
       if (this.element.shadowOrbit) {
         const parts = this.element.shadowOrbit.trim().split(/\s+/);
-        const thetaDeg = parts.length > 0 && parts[0] !== 'auto' ? parseFloat(parts[0]) : 0;
-        const phiDeg = parts.length > 1 && parts[1] !== 'auto' ? parseFloat(parts[1]) : 0;
+        const thetaDeg =
+            parts.length > 0 && parts[0] !== 'auto' ? parseFloat(parts[0]) : 0;
+        const phiDeg =
+            parts.length > 1 && parts[1] !== 'auto' ? parseFloat(parts[1]) : 0;
         const theta = (isNaN(thetaDeg) ? 0 : thetaDeg) * Math.PI / 180;
         const phi = (isNaN(phiDeg) ? 0 : phiDeg) * Math.PI / 180;
         this.shadow.setOrbit(theta, phi);
@@ -1146,6 +1149,16 @@ export class ModelScene extends Scene {
     const shadow = this.shadow;
     if (shadow != null) {
       shadow.setOrbit(theta, phi);
+    }
+  }
+
+  /**
+   * Sets the decay time of shadow orbit transitions.
+   */
+  setShadowInterpolationDecay(decayMilliseconds: number) {
+    const shadow = this.shadow;
+    if (shadow != null) {
+      shadow.setInterpolationDecay(decayMilliseconds);
     }
   }
 

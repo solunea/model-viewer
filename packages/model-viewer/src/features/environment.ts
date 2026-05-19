@@ -23,6 +23,7 @@ export const BASE_OPACITY = 0.5;
 const DEFAULT_SHADOW_INTENSITY = 0.0;
 const DEFAULT_SHADOW_SOFTNESS = 1.0;
 const DEFAULT_SHADOW_ORBIT = '0deg 0deg';
+const DEFAULT_SHADOW_INTERPOLATION_DECAY = 0;
 const DEFAULT_EXPOSURE = 1.0;
 
 export type ToneMappingValue = 'auto'|'aces'|'agx'|'commerce'|'neutral'|
@@ -40,6 +41,7 @@ export declare interface EnvironmentInterface {
   shadowIntensity: number;
   shadowSoftness: number;
   shadowOrbit: string;
+  shadowInterpolationDecay: number;
   exposure: number;
   hasBakedShadow(): boolean;
 }
@@ -53,14 +55,19 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
     @property({type: String, attribute: 'skybox-image'})
     skyboxImage: string|null = null;
 
-    @property({type: Number, attribute: 'shadow-intensity', hasChanged: () => true})
+    @property(
+        {type: Number, attribute: 'shadow-intensity', hasChanged: () => true})
     shadowIntensity: number = DEFAULT_SHADOW_INTENSITY;
 
-    @property({type: Number, attribute: 'shadow-softness', hasChanged: () => true})
+    @property(
+        {type: Number, attribute: 'shadow-softness', hasChanged: () => true})
     shadowSoftness: number = DEFAULT_SHADOW_SOFTNESS;
 
     @property({type: String, attribute: 'shadow-orbit', hasChanged: () => true})
     shadowOrbit: string = DEFAULT_SHADOW_ORBIT;
+
+    @property({type: Number, attribute: 'shadow-interpolation-decay'})
+    shadowInterpolationDecay: number = DEFAULT_SHADOW_INTERPOLATION_DECAY;
 
     @property({type: Number}) exposure: number = DEFAULT_EXPOSURE;
 
@@ -91,12 +98,18 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
       if (changedProperties.has('shadowOrbit')) {
         const orbitStr = this.shadowOrbit || '0deg 0deg';
         const parts = orbitStr.trim().split(/\s+/);
-        const thetaDeg = parts.length > 0 && parts[0] !== 'auto' ? parseFloat(parts[0]) : 0;
-        const phiDeg = parts.length > 1 && parts[1] !== 'auto' ? parseFloat(parts[1]) : 0;
+        const thetaDeg =
+            parts.length > 0 && parts[0] !== 'auto' ? parseFloat(parts[0]) : 0;
+        const phiDeg =
+            parts.length > 1 && parts[1] !== 'auto' ? parseFloat(parts[1]) : 0;
         const theta = (isNaN(thetaDeg) ? 0 : thetaDeg) * Math.PI / 180;
         const phi = (isNaN(phiDeg) ? 0 : phiDeg) * Math.PI / 180;
         this[$scene].setShadowOrbit(theta, phi);
         this[$needsRender]();
+      }
+
+      if (changedProperties.has('shadowInterpolationDecay')) {
+        this[$scene].setShadowInterpolationDecay(this.shadowInterpolationDecay);
       }
 
       if (changedProperties.has('exposure')) {

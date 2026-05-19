@@ -15,6 +15,7 @@
 
 import {BackSide, BasicShadowMap, Box3, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial, MeshDepthMaterial, Object3D, OrthographicCamera, PlaneGeometry, RGBAFormat, Scene, ShaderChunk, ShaderMaterial, ShadowMaterial, Vector3, WebGLRenderer, WebGLRenderTarget} from 'three';
 
+import {Damper} from './Damper.js';
 import {ModelScene} from './ModelScene.js';
 
 export type Side = 'back'|'bottom';
@@ -177,6 +178,9 @@ export class Shadow extends Object3D {
   private phi = DEFAULT_SHADOW_PHI;
   private goalTheta = DEFAULT_SHADOW_THETA;
   private goalPhi = DEFAULT_SHADOW_PHI;
+  private interpolationDecay = 0;
+  private thetaDamper = new Damper();
+  private phiDamper = new Damper();
   public needsUpdate = false;
 
   // ─── Basic mode state ───
@@ -353,37 +357,83 @@ export class Shadow extends Object3D {
     const isFlatOrbit = (phi === 0);
     const needMode = isFlatOrbit ? 'basic' : 'pcss';
 
-    if (needMode !== this.mode) {
+    if (needMode === 'pcss' && this.mode !== 'pcss') {
       const savedSoftness = this.softness;
       const savedIntensity = this.intensity;
-      if (needMode === 'pcss') {
-        this.initPCSSMode();
-        this.setupPCSSScene(this.side);
-      } else {
-        this.initBasicMode();
-        this.setupBasicScene(this.side);
-      }
+      this.initPCSSMode();
+      this.setupPCSSScene(this.side);
       this.setSoftness(savedSoftness);
       this.setIntensity(savedIntensity);
     }
 
     this.goalTheta = theta;
     this.goalPhi = phi;
+    if (this.interpolationDecay <= 0) {
+      this.theta = theta;
+      this.phi = phi;
+      if (needMode !== this.mode) {
+        const savedSoftness = this.softness;
+        const savedIntensity = this.intensity;
+        this.initBasicMode();
+        this.setupBasicScene(this.side);
+        this.setSoftness(savedSoftness);
+        this.setIntensity(savedIntensity);
+      } else if (this.mode === 'pcss') {
+        this.updatePCSSLightPosition();
+      }
+    }
     this.needsUpdate = true;
   }
 
-  update(_delta: number): boolean {
+  update(delta: number): boolean {
     if (this.mode === 'basic') return false;
     if (this.theta === this.goalTheta && this.phi === this.goalPhi) {
       return false;
     }
 
-    this.theta = this.goalTheta;
-    this.phi = this.goalPhi;
+    if (this.interpolationDecay <= 0) {
+      this.theta = this.goalTheta;
+      this.phi = this.goalPhi;
+    } else {
+      this.theta = this.thetaDamper.update(
+          this.theta, this.goalTheta, delta, Math.PI * 2);
+      this.phi =
+          this.phiDamper.update(this.phi, this.goalPhi, delta, Math.PI);
+    }
 
-    this.updatePCSSLightPosition();
+    if (this.phi === 0 && this.goalPhi === 0) {
+      const savedSoftness = this.softness;
+      const savedIntensity = this.intensity;
+      this.initBasicMode();
+      this.setupBasicScene(this.side);
+      this.setSoftness(savedSoftness);
+      this.setIntensity(savedIntensity);
+    } else {
+      this.updatePCSSLightPosition();
+    }
     this.needsUpdate = true;
     return true;
+  }
+
+  setInterpolationDecay(decayMilliseconds: number) {
+    this.interpolationDecay = decayMilliseconds;
+    this.thetaDamper.setDecayTime(decayMilliseconds);
+    this.phiDamper.setDecayTime(decayMilliseconds);
+    if (decayMilliseconds <= 0 && this.mode === 'pcss') {
+      this.theta = this.goalTheta;
+      this.phi = this.goalPhi;
+      if (this.phi === 0) {
+        const savedSoftness = this.softness;
+        const savedIntensity = this.intensity;
+        this.initBasicMode();
+        this.setupBasicScene(this.side);
+        this.setSoftness(savedSoftness);
+        this.setIntensity(savedIntensity);
+      } else {
+        this.updatePCSSLightPosition();
+      }
+      this.needsUpdate = true;
+    }
   }
 
   setSoftness(softness: number) {
