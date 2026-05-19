@@ -95,6 +95,10 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
         this[$needsRender]();
       }
 
+      if (changedProperties.has('shadowInterpolationDecay')) {
+        this[$scene].setShadowInterpolationDecay(this.shadowInterpolationDecay);
+      }
+
       if (changedProperties.has('shadowOrbit')) {
         const orbitStr = this.shadowOrbit || '0deg 0deg';
         const parts = orbitStr.trim().split(/\s+/);
@@ -106,10 +110,6 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
         const phi = (isNaN(phiDeg) ? 0 : phiDeg) * Math.PI / 180;
         this[$scene].setShadowOrbit(theta, phi);
         this[$needsRender]();
-      }
-
-      if (changedProperties.has('shadowInterpolationDecay')) {
-        this[$scene].setShadowInterpolationDecay(this.shadowInterpolationDecay);
       }
 
       if (changedProperties.has('exposure')) {

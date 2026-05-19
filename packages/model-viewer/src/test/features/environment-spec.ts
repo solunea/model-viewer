@@ -143,6 +143,29 @@ suite('Environment', () => {
       const newIntensity = scene.shadow!.getIntensity();
       expect(newIntensity).to.be.eq(BASE_OPACITY);
     });
+
+    test('applies shadow interpolation decay before same-update orbit changes',
+         () => {
+           const calls = new Array<string>();
+           const setShadowInterpolationDecay =
+               scene.setShadowInterpolationDecay;
+           const setShadowOrbit = scene.setShadowOrbit;
+
+           scene.setShadowInterpolationDecay = () => calls.push('decay');
+           scene.setShadowOrbit = () => calls.push('orbit');
+
+           try {
+             (element as any).updated(new Map<string, unknown>([
+               ['shadowInterpolationDecay', 0],
+               ['shadowOrbit', '0deg 0deg'],
+             ]));
+           } finally {
+             scene.setShadowInterpolationDecay = setShadowInterpolationDecay;
+             scene.setShadowOrbit = setShadowOrbit;
+           }
+
+           expect(calls).to.be.eql(['decay', 'orbit']);
+         });
   });
 
   suite('environment-image', () => {
