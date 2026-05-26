@@ -639,9 +639,8 @@ export class ModelScene extends Scene {
     this.skyboxTransitionPending = nextSkybox;
     transition.material.opacity = this.skyboxTransitionOpacity;
     transition.material.needsUpdate = true;
-    transition.scale.setScalar(
-        Math.max(GROUNDED_SKYBOX_SIZE * this.boundingSphere.radius, 1));
-    this.target.add(transition);
+    this.add(transition);
+    this.updateSkyboxTransitionTransform();
   }
 
   private clearSkyboxTransition() {
@@ -659,6 +658,7 @@ export class ModelScene extends Scene {
       return false;
     }
 
+    this.updateSkyboxTransitionTransform();
     this.skyboxTransitionOpacity = this.skyboxTransitionDamper.update(
         this.skyboxTransitionOpacity, this.skyboxTransitionGoal, delta, 1);
     transition.material.opacity = this.skyboxTransitionOpacity;
@@ -671,6 +671,17 @@ export class ModelScene extends Scene {
     }
 
     return true;
+  }
+
+  private updateSkyboxTransitionTransform() {
+    const transition = this.skyboxTransition;
+    if (transition == null) {
+      return;
+    }
+
+    const camera = this.getCamera() as PerspectiveCamera;
+    transition.position.copy(camera.position);
+    transition.scale.setScalar(Math.max(camera.far * 0.5, 1));
   }
 
   farRadius() {

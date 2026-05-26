@@ -670,6 +670,7 @@ declare class ModelScene extends Scene$1 {
     private startSkyboxTransition;
     private clearSkyboxTransition;
     updateSkyboxTransition(delta: number): boolean;
+    private updateSkyboxTransitionTransform;
     farRadius(): number;
     setGroundedSkybox(): void;
     /**

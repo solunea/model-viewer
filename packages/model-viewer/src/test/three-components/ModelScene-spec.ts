@@ -146,9 +146,11 @@ suite('ModelScene', () => {
 
       const transition = (scene as any).skyboxTransition;
       expect(scene.background).to.be.equal(firstSkybox);
-      expect(transition.parent).to.be.equal(scene.target);
+      expect(transition.parent).to.be.equal(scene);
       expect(transition.material.map).to.be.equal(secondSkybox);
       expect(transition.material.opacity).to.be.equal(0);
+      expect(transition.scale.x)
+          .to.be.equal((scene.getCamera() as any).far * 0.5);
 
       scene.updateSkyboxTransition(16);
 
