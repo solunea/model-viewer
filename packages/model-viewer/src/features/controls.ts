@@ -60,6 +60,9 @@ const fade = timeline({
 
 export const DEFAULT_FOV_DEG = 30;
 export const DEFAULT_MIN_FOV_DEG = 12;
+const SKYBOX_ONLY_CAMERA_RADIUS = 0.001;
+const SKYBOX_ONLY_MIN_FOV_DEG = 25;
+const SKYBOX_ONLY_MAX_FOV_DEG = 100;
 
 export const DEFAULT_CAMERA_ORBIT = '0deg 75deg 105%';
 const DEFAULT_CAMERA_TARGET = 'auto auto auto';
@@ -251,10 +254,12 @@ const $syncMinCameraOrbit = Symbol('syncMinCameraOrbit');
 const $syncMaxCameraOrbit = Symbol('syncMaxCameraOrbit');
 const $syncMinFieldOfView = Symbol('syncMinFieldOfView');
 const $syncMaxFieldOfView = Symbol('syncMaxFieldOfView');
+const $syncSkyboxOnlyCamera = Symbol('syncSkyboxOnlyCamera');
 
 export declare interface ControlsInterface {
   cameraControls: boolean;
   mode: CameraControlMode;
+  skyboxOnly: boolean;
   cameraOrbit: string;
   cameraTarget: string;
   fieldOfView: string;
@@ -296,6 +301,9 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     @property({type: String, attribute: 'mode'})
     mode: CameraControlMode = CameraControlMode.ORBIT;
+
+    @property({type: Boolean, attribute: 'skybox-only'})
+    skyboxOnly: boolean = false;
 
     @style({
       intrinsics: cameraOrbitIntrinsics,
@@ -530,6 +538,17 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
                                                   ControlMode.ORBIT;
       }
 
+      if (changedProperties.has('skyboxOnly')) {
+        this.requestUpdate('cameraOrbit');
+        this.requestUpdate('cameraTarget');
+        this.requestUpdate('fieldOfView');
+        this.requestUpdate('minCameraOrbit');
+        this.requestUpdate('maxCameraOrbit');
+        this.requestUpdate('minFieldOfView');
+        this.requestUpdate('maxFieldOfView');
+        this[$syncSkyboxOnlyCamera]();
+      }
+
       if (changedProperties.has('disableZoom')) {
         controls.disableZoom = this.disableZoom;
       }
@@ -716,9 +735,15 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
     [$syncFieldOfView](style: EvaluatedStyle<Intrinsics<['rad']>>) {
       const controls = this[$controls];
       const scene = this[$scene];
-      scene.framedFoVDeg = style[0] * 180 / Math.PI;
+      scene.framedFoVDeg = this.skyboxOnly ?
+          Math.min(
+              SKYBOX_ONLY_MAX_FOV_DEG,
+              Math.max(SKYBOX_ONLY_MIN_FOV_DEG, style[0] * 180 / Math.PI)) :
+          style[0] * 180 / Math.PI;
       controls.changeSource = ChangeSource.NONE;
-      controls.setFieldOfView(scene.adjustedFoV(scene.framedFoVDeg));
+      controls.setFieldOfView(
+          this.skyboxOnly ? scene.framedFoVDeg :
+                            scene.adjustedFoV(scene.framedFoVDeg));
       this[$cancelPrompts]();
     }
 
@@ -731,7 +756,9 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
         this[$maintainThetaPhi] = false;
       }
       controls.changeSource = ChangeSource.NONE;
-      controls.setOrbit(style[0], style[1], style[2]);
+      controls.setOrbit(
+          style[0], style[1],
+          this.skyboxOnly ? SKYBOX_ONLY_CAMERA_RADIUS : style[2]);
       this[$cancelPrompts]();
     }
 
@@ -739,7 +766,7 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       this[$controls].applyOptions({
         minimumAzimuthalAngle: style[0],
         minimumPolarAngle: style[1],
-        minimumRadius: style[2]
+        minimumRadius: this.skyboxOnly ? SKYBOX_ONLY_CAMERA_RADIUS : style[2]
       });
       this.jumpCameraToGoal();
     }
@@ -748,31 +775,55 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       this[$controls].applyOptions({
         maximumAzimuthalAngle: style[0],
         maximumPolarAngle: style[1],
-        maximumRadius: style[2]
+        maximumRadius: this.skyboxOnly ? SKYBOX_ONLY_CAMERA_RADIUS : style[2]
       });
-      this[$updateCameraForRadius](style[2]);
+      this[$updateCameraForRadius](
+          this.skyboxOnly ? SKYBOX_ONLY_CAMERA_RADIUS : style[2]);
       this.jumpCameraToGoal();
     }
 
     [$syncMinFieldOfView](style: EvaluatedStyle<Intrinsics<['rad']>>) {
       this[$controls].applyOptions(
-          {minimumFieldOfView: style[0] * 180 / Math.PI});
+          {minimumFieldOfView: this.skyboxOnly ?
+               SKYBOX_ONLY_MIN_FOV_DEG :
+               style[0] * 180 / Math.PI});
       this.jumpCameraToGoal();
     }
 
     [$syncMaxFieldOfView](style: EvaluatedStyle<Intrinsics<['rad']>>) {
-      const fov = this[$scene].adjustedFoV(style[0] * 180 / Math.PI);
+      const fov = this.skyboxOnly ?
+          SKYBOX_ONLY_MAX_FOV_DEG :
+          this[$scene].adjustedFoV(style[0] * 180 / Math.PI);
       this[$controls].applyOptions({maximumFieldOfView: fov});
       this.jumpCameraToGoal();
     }
 
     [$syncCameraTarget](style: EvaluatedStyle<Vector3Intrinsics>) {
-      const [x, y, z] = style;
+      const [x, y, z] = this.skyboxOnly ? [0, 0, 0] : style;
       if (!this[$renderer].arRenderer.isPresenting) {
         this[$scene].setTarget(x, y, z);
       }
       this[$controls].changeSource = ChangeSource.NONE;
       this[$renderer].arRenderer.updateTarget();
+      this[$cancelPrompts]();
+    }
+
+    [$syncSkyboxOnlyCamera]() {
+      if (!this.skyboxOnly) {
+        return;
+      }
+
+      this[$scene].setTarget(0, 0, 0);
+      this[$controls].applyOptions({
+        minimumRadius: SKYBOX_ONLY_CAMERA_RADIUS,
+        maximumRadius: SKYBOX_ONLY_CAMERA_RADIUS,
+        minimumFieldOfView: SKYBOX_ONLY_MIN_FOV_DEG,
+        maximumFieldOfView: SKYBOX_ONLY_MAX_FOV_DEG
+      });
+      this[$controls].changeSource = ChangeSource.NONE;
+      this[$controls].setOrbit(undefined, undefined, SKYBOX_ONLY_CAMERA_RADIUS);
+      this[$controls].setFieldOfView(this.getFieldOfView());
+      this.jumpCameraToGoal();
       this[$cancelPrompts]();
     }
 

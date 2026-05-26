@@ -152,6 +152,24 @@ suite('Controls', () => {
       expect(element.getCameraOrbit().radius).to.be.equal(defaultRadius);
     });
 
+    test('skybox-only locks camera radius and target', async () => {
+      element.skyboxOnly = true;
+      element.cameraOrbit = '45deg 90deg 5m';
+      element.cameraTarget = '1m 2m 3m';
+      element.jumpCameraToGoal();
+      await element.updateComplete;
+
+      const orbit = element.getCameraOrbit();
+      const target = element.getCameraTarget();
+
+      expect(orbit.theta).to.be.closeTo(Math.PI / 4, 0.00001);
+      expect(orbit.phi).to.be.closeTo(Math.PI / 2, 0.00001);
+      expect(orbit.radius).to.be.equal(0.001);
+      expect(target.x).to.be.equal(0);
+      expect(target.y).to.be.equal(0);
+      expect(target.z).to.be.equal(0);
+    });
+
     test('can independently adjust target', async () => {
       const target = element.getCameraTarget();
       target.x += 1;
@@ -209,6 +227,21 @@ suite('Controls', () => {
       await element.updateComplete;
 
       expect(element.getFieldOfView()).to.be.closeTo(nextFov, 0.00001);
+    });
+
+    test('skybox-only clamps FOV to panorama limits', async () => {
+      element.skyboxOnly = true;
+      await element.updateComplete;
+
+      element.fieldOfView = '10deg';
+      element.jumpCameraToGoal();
+      await element.updateComplete;
+      expect(element.getFieldOfView()).to.be.closeTo(25, 0.00001);
+
+      element.fieldOfView = '120deg';
+      element.jumpCameraToGoal();
+      await element.updateComplete;
+      expect(element.getFieldOfView()).to.be.closeTo(100, 0.00001);
     });
 
     test('changes FOV basis when aspect ratio changes', async () => {

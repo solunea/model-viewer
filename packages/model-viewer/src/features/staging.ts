@@ -46,8 +46,15 @@ const $onCameraChange = Symbol('onCameraChange');
 export declare interface StagingInterface {
   autoRotate: boolean;
   autoRotateDelay: number;
+  rotationPerSecond: string;
   readonly turntableRotation: number;
   resetTurntableRotation(theta?: number): void;
+}
+
+interface SkyboxOnlyControls {
+  skyboxOnly?: boolean;
+  cameraOrbit?: string;
+  getCameraOrbit?: () => {theta: number, phi: number, radius: number};
 }
 
 export const StagingMixin = <T extends Constructor<ModelViewerElementBase>>(
@@ -105,8 +112,17 @@ export const StagingMixin = <T extends Constructor<ModelViewerElementBase>>(
           delta, time - this[$autoRotateStartTime] - this.autoRotateDelay);
 
       if (rotationDelta > 0) {
-        this[$scene].yaw = this.turntableRotation +
-            this[$radiansPerSecond] * rotationDelta * 0.001;
+        const skyboxControls = this as unknown as SkyboxOnlyControls;
+        if (skyboxControls.skyboxOnly === true &&
+            typeof skyboxControls.getCameraOrbit === 'function') {
+          const orbit = skyboxControls.getCameraOrbit();
+          skyboxControls.cameraOrbit = `${orbit.theta +
+              this[$radiansPerSecond] * rotationDelta * 0.001}rad ${
+              orbit.phi}rad ${orbit.radius}m`;
+        } else {
+          this[$scene].yaw = this.turntableRotation +
+              this[$radiansPerSecond] * rotationDelta * 0.001;
+        }
       }
     }
 

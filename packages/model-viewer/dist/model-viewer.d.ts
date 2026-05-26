@@ -1574,6 +1574,7 @@ declare const CameraControlMode: {
 declare interface ControlsInterface {
     cameraControls: boolean;
     mode: CameraControlMode;
+    skyboxOnly: boolean;
     cameraOrbit: string;
     cameraTarget: string;
     fieldOfView: string;
@@ -1623,6 +1624,7 @@ declare interface EnvironmentInterface {
 declare interface StagingInterface {
     autoRotate: boolean;
     autoRotateDelay: number;
+    rotationPerSecond: string;
     readonly turntableRotation: number;
     resetTurntableRotation(theta?: number): void;
 }
