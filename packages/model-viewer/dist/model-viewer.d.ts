@@ -591,6 +591,8 @@ declare class ModelScene extends Scene$1 {
     private targetDamperZ;
     private skyboxInterpolationDecay;
     private skyboxTransitionOpacity;
+    private skyboxTransitionGoal;
+    private skyboxTransitionPending;
     private skyboxTransitionDamper;
     private skyboxTransition;
     private _currentGLTF;
@@ -664,6 +666,7 @@ declare class ModelScene extends Scene$1 {
     private currentSkybox;
     setBackground(skybox: Texture$4 | null): void;
     setSkyboxInterpolationDecay(decayMilliseconds: number): void;
+    private shouldTransitionSkybox;
     private startSkyboxTransition;
     private clearSkyboxTransition;
     updateSkyboxTransition(delta: number): boolean;

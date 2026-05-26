@@ -115,6 +115,8 @@ export class ModelScene extends Scene {
   private targetDamperZ = new Damper();
   private skyboxInterpolationDecay = 0;
   private skyboxTransitionOpacity = 0;
+  private skyboxTransitionGoal = 0;
+  private skyboxTransitionPending: Texture|null = null;
   private skyboxTransitionDamper = new Damper();
   private skyboxTransition: Mesh<SphereGeometry, MeshBasicMaterial>|null = null;
 
@@ -568,8 +570,12 @@ export class ModelScene extends Scene {
     }
     const previousSkybox = this.currentSkybox();
     this.environment = environment;
-    this.setBackground(skybox);
-    this.startSkyboxTransition(previousSkybox, skybox);
+    if (this.shouldTransitionSkybox(previousSkybox, skybox)) {
+      this.startSkyboxTransition(previousSkybox, skybox);
+    } else {
+      this.clearSkyboxTransition();
+      this.setBackground(skybox);
+    }
     this.queueRender();
   }
 
@@ -594,18 +600,22 @@ export class ModelScene extends Scene {
     this.skyboxInterpolationDecay = decayMilliseconds;
     this.skyboxTransitionDamper.setDecayTime(decayMilliseconds);
     if (decayMilliseconds <= 0) {
+      if (this.skyboxTransitionGoal === 1) {
+        this.setBackground(this.skyboxTransitionPending);
+      }
       this.clearSkyboxTransition();
     }
   }
 
+  private shouldTransitionSkybox(
+      previousSkybox: Texture|null, nextSkybox: Texture|null) {
+    return this.skyboxInterpolationDecay > 0 &&
+        (previousSkybox != null || nextSkybox != null) &&
+        previousSkybox !== nextSkybox;
+  }
+
   private startSkyboxTransition(
       previousSkybox: Texture|null, nextSkybox: Texture|null) {
-    if (this.skyboxInterpolationDecay <= 0 || previousSkybox == null ||
-        previousSkybox === nextSkybox) {
-      this.clearSkyboxTransition();
-      return;
-    }
-
     if (this.skyboxTransition == null) {
       const geometry = new SphereGeometry(1, 64, 32);
       geometry.scale(1, 1, -1);
@@ -621,13 +631,17 @@ export class ModelScene extends Scene {
     }
 
     const transition = this.skyboxTransition;
-    transition.material.map = previousSkybox;
-    transition.material.opacity = 1;
+    const fadingIn = nextSkybox != null;
+    this.setBackground(fadingIn ? previousSkybox : null);
+    transition.material.map = fadingIn ? nextSkybox : previousSkybox;
+    this.skyboxTransitionOpacity = fadingIn ? 0 : 1;
+    this.skyboxTransitionGoal = fadingIn ? 1 : 0;
+    this.skyboxTransitionPending = nextSkybox;
+    transition.material.opacity = this.skyboxTransitionOpacity;
     transition.material.needsUpdate = true;
     transition.scale.setScalar(
         Math.max(GROUNDED_SKYBOX_SIZE * this.boundingSphere.radius, 1));
     this.target.add(transition);
-    this.skyboxTransitionOpacity = 1;
   }
 
   private clearSkyboxTransition() {
@@ -635,6 +649,8 @@ export class ModelScene extends Scene {
       this.skyboxTransition.removeFromParent();
     }
     this.skyboxTransitionOpacity = 0;
+    this.skyboxTransitionGoal = 0;
+    this.skyboxTransitionPending = null;
   }
 
   updateSkyboxTransition(delta: number): boolean {
@@ -644,10 +660,13 @@ export class ModelScene extends Scene {
     }
 
     this.skyboxTransitionOpacity = this.skyboxTransitionDamper.update(
-        this.skyboxTransitionOpacity, 0, delta, 1);
+        this.skyboxTransitionOpacity, this.skyboxTransitionGoal, delta, 1);
     transition.material.opacity = this.skyboxTransitionOpacity;
 
-    if (this.skyboxTransitionOpacity === 0) {
+    if (this.skyboxTransitionOpacity === this.skyboxTransitionGoal) {
+      if (this.skyboxTransitionGoal === 1) {
+        this.setBackground(this.skyboxTransitionPending);
+      }
       this.clearSkyboxTransition();
     }
 

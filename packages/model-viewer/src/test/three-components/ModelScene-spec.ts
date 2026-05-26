@@ -136,19 +136,19 @@ suite('ModelScene', () => {
   });
 
   suite('skybox interpolation', () => {
-    test('fades out the previous skybox when decay is set', () => {
+    test('fades in the next skybox when decay is set', () => {
       const firstSkybox = new Texture();
       const secondSkybox = new Texture();
 
-      scene.setSkyboxInterpolationDecay(200);
       scene.setEnvironmentAndSkybox(null, firstSkybox);
+      scene.setSkyboxInterpolationDecay(200);
       scene.setEnvironmentAndSkybox(null, secondSkybox);
 
       const transition = (scene as any).skyboxTransition;
-      expect(scene.background).to.be.equal(secondSkybox);
+      expect(scene.background).to.be.equal(firstSkybox);
       expect(transition.parent).to.be.equal(scene.target);
-      expect(transition.material.map).to.be.equal(firstSkybox);
-      expect(transition.material.opacity).to.be.equal(1);
+      expect(transition.material.map).to.be.equal(secondSkybox);
+      expect(transition.material.opacity).to.be.equal(0);
 
       scene.updateSkyboxTransition(16);
 
