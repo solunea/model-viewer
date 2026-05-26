@@ -880,6 +880,15 @@
         }
       },
       {
+        "name": "skybox-interpolation-decay",
+        "htmlName": "skyboxInterpolationDecay",
+        "description": "Controls the decay time in milliseconds for visual transitions between skybox-image values. This crossfades the skybox background only; environment lighting and reflections update immediately. Set to 0 to change the skybox immediately.",
+        "default": {
+          "default": "0",
+          "options": "any non-negative value"
+        }
+      },
+      {
         "name": "environment-image",
         "htmlName": "environmentImage",
         "description": "Controls the environmental reflection of the model. Normally if <span class='attribute'>skybox-image</span> is set, that image will also be used for the <span class='attribute'>environment-image</span>. Use <span class='attribute'>environment-image</span> to only set the reflection without affecting the background. If neither is specified, default neutral lighting will be applied. If 'legacy' is specified without a skybox, then our old default environment is applied instead.",

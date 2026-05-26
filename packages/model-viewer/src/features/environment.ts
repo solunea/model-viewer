@@ -24,6 +24,7 @@ const DEFAULT_SHADOW_INTENSITY = 0.0;
 const DEFAULT_SHADOW_SOFTNESS = 1.0;
 const DEFAULT_SHADOW_ORBIT = '0deg 0deg';
 const DEFAULT_SHADOW_INTERPOLATION_DECAY = 0;
+const DEFAULT_SKYBOX_INTERPOLATION_DECAY = 0;
 const DEFAULT_EXPOSURE = 1.0;
 
 export type ToneMappingValue = 'auto'|'aces'|'agx'|'commerce'|'neutral'|
@@ -42,6 +43,7 @@ export declare interface EnvironmentInterface {
   shadowSoftness: number;
   shadowOrbit: string;
   shadowInterpolationDecay: number;
+  skyboxInterpolationDecay: number;
   exposure: number;
   hasBakedShadow(): boolean;
 }
@@ -68,6 +70,9 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     @property({type: Number, attribute: 'shadow-interpolation-decay'})
     shadowInterpolationDecay: number = DEFAULT_SHADOW_INTERPOLATION_DECAY;
+
+    @property({type: Number, attribute: 'skybox-interpolation-decay'})
+    skyboxInterpolationDecay: number = DEFAULT_SKYBOX_INTERPOLATION_DECAY;
 
     @property({type: Number}) exposure: number = DEFAULT_EXPOSURE;
 
@@ -97,6 +102,10 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
       if (changedProperties.has('shadowInterpolationDecay')) {
         this[$scene].setShadowInterpolationDecay(this.shadowInterpolationDecay);
+      }
+
+      if (changedProperties.has('skyboxInterpolationDecay')) {
+        this[$scene].setSkyboxInterpolationDecay(this.skyboxInterpolationDecay);
       }
 
       if (changedProperties.has('shadowOrbit')) {

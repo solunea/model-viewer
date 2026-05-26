@@ -549,6 +549,10 @@ export default class ModelViewerElementBase extends ReactiveElement {
         this[$needsRender]();
       }
     }
+
+    if (this[$scene].updateSkyboxTransition(delta)) {
+      this[$needsRender]();
+    }
   }
 
   [$markLoaded]() {

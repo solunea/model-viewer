@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import {AnimationAction, AnimationActionLoopStyles, AnimationClip, AnimationMixer, AnimationMixerEventMap, Box3, Camera, Euler, Event as ThreeEvent, LoopOnce, LoopPingPong, LoopRepeat, Material, Matrix3, Mesh, NeutralToneMapping, Object3D, PerspectiveCamera, Raycaster, Scene, Sphere, Texture, ToneMapping, Triangle, Vector2, Vector3, WebGLRenderer, XRTargetRaySpace} from 'three';
+import {AnimationAction, AnimationActionLoopStyles, AnimationClip, AnimationMixer, AnimationMixerEventMap, Box3, Camera, Euler, Event as ThreeEvent, LoopOnce, LoopPingPong, LoopRepeat, Material, Matrix3, Mesh, MeshBasicMaterial, NeutralToneMapping, Object3D, PerspectiveCamera, Raycaster, Scene, Sphere, SphereGeometry, Texture, ToneMapping, Triangle, Vector2, Vector3, WebGLRenderer, XRTargetRaySpace} from 'three';
 import {CSS2DRenderer} from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {reduceVertices} from 'three/examples/jsm/utils/SceneUtils.js';
 
@@ -113,6 +113,10 @@ export class ModelScene extends Scene {
   private targetDamperX = new Damper();
   private targetDamperY = new Damper();
   private targetDamperZ = new Damper();
+  private skyboxInterpolationDecay = 0;
+  private skyboxTransitionOpacity = 0;
+  private skyboxTransitionDamper = new Damper();
+  private skyboxTransition: Mesh<SphereGeometry, MeshBasicMaterial>|null = null;
 
   private _currentGLTF: ModelViewerGLTFInstance|null = null;
   private _model: Object3D|null = null;
@@ -297,6 +301,7 @@ export class ModelScene extends Scene {
     this.url = null;
     this.renderCount = 0;
     this.queueRender();
+    this.clearSkyboxTransition();
     if (this.shadow != null) {
       this.shadow.setIntensity(0);
     }
@@ -325,6 +330,11 @@ export class ModelScene extends Scene {
 
   dispose() {
     this.reset();
+    if (this.skyboxTransition != null) {
+      this.skyboxTransition.geometry.dispose();
+      this.skyboxTransition.material.dispose();
+      this.skyboxTransition = null;
+    }
     if (this.shadow != null) {
       this.shadow.dispose();
       this.shadow = null;
@@ -556,9 +566,17 @@ export class ModelScene extends Scene {
     if (this.element[$renderer].arRenderer.presentedScene === this) {
       return;
     }
+    const previousSkybox = this.currentSkybox();
     this.environment = environment;
     this.setBackground(skybox);
+    this.startSkyboxTransition(previousSkybox, skybox);
     this.queueRender();
+  }
+
+  private currentSkybox(): Texture|null {
+    return this.groundedSkybox.parent != null ?
+        this.groundedSkybox.map :
+        this.background as Texture | null;
   }
 
   setBackground(skybox: Texture|null) {
@@ -570,6 +588,70 @@ export class ModelScene extends Scene {
       this.target.remove(this.groundedSkybox);
       this.background = skybox;
     }
+  }
+
+  setSkyboxInterpolationDecay(decayMilliseconds: number) {
+    this.skyboxInterpolationDecay = decayMilliseconds;
+    this.skyboxTransitionDamper.setDecayTime(decayMilliseconds);
+    if (decayMilliseconds <= 0) {
+      this.clearSkyboxTransition();
+    }
+  }
+
+  private startSkyboxTransition(
+      previousSkybox: Texture|null, nextSkybox: Texture|null) {
+    if (this.skyboxInterpolationDecay <= 0 || previousSkybox == null ||
+        previousSkybox === nextSkybox) {
+      this.clearSkyboxTransition();
+      return;
+    }
+
+    if (this.skyboxTransition == null) {
+      const geometry = new SphereGeometry(1, 64, 32);
+      geometry.scale(1, 1, -1);
+      const material = new MeshBasicMaterial({
+        depthWrite: false,
+        map: previousSkybox,
+        opacity: 1,
+        transparent: true,
+      });
+      this.skyboxTransition = new Mesh(geometry, material);
+      this.skyboxTransition.name = 'SkyboxTransition';
+      this.skyboxTransition.userData.noHit = true;
+    }
+
+    const transition = this.skyboxTransition;
+    transition.material.map = previousSkybox;
+    transition.material.opacity = 1;
+    transition.material.needsUpdate = true;
+    transition.scale.setScalar(
+        Math.max(GROUNDED_SKYBOX_SIZE * this.boundingSphere.radius, 1));
+    this.target.add(transition);
+    this.skyboxTransitionOpacity = 1;
+  }
+
+  private clearSkyboxTransition() {
+    if (this.skyboxTransition != null) {
+      this.skyboxTransition.removeFromParent();
+    }
+    this.skyboxTransitionOpacity = 0;
+  }
+
+  updateSkyboxTransition(delta: number): boolean {
+    const transition = this.skyboxTransition;
+    if (transition == null || transition.parent == null) {
+      return false;
+    }
+
+    this.skyboxTransitionOpacity = this.skyboxTransitionDamper.update(
+        this.skyboxTransitionOpacity, 0, delta, 1);
+    transition.material.opacity = this.skyboxTransitionOpacity;
+
+    if (this.skyboxTransitionOpacity === 0) {
+      this.clearSkyboxTransition();
+    }
+
+    return true;
   }
 
   farRadius() {

@@ -589,6 +589,10 @@ declare class ModelScene extends Scene$1 {
     private targetDamperX;
     private targetDamperY;
     private targetDamperZ;
+    private skyboxInterpolationDecay;
+    private skyboxTransitionOpacity;
+    private skyboxTransitionDamper;
+    private skyboxTransition;
     private _currentGLTF;
     private _model;
     private mixer;
@@ -657,7 +661,12 @@ declare class ModelScene extends Scene$1 {
         height: number;
     };
     setEnvironmentAndSkybox(environment: Texture$4 | null, skybox: Texture$4 | null): void;
+    private currentSkybox;
     setBackground(skybox: Texture$4 | null): void;
+    setSkyboxInterpolationDecay(decayMilliseconds: number): void;
+    private startSkyboxTransition;
+    private clearSkyboxTransition;
+    updateSkyboxTransition(delta: number): boolean;
     farRadius(): number;
     setGroundedSkybox(): void;
     /**
@@ -1602,6 +1611,7 @@ declare interface EnvironmentInterface {
     shadowSoftness: number;
     shadowOrbit: string;
     shadowInterpolationDecay: number;
+    skyboxInterpolationDecay: number;
     exposure: number;
     hasBakedShadow(): boolean;
 }

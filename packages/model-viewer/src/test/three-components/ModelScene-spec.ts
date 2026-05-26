@@ -16,7 +16,7 @@
 import '../renderer-gate.js';
 
 import {expect} from 'chai';
-import {Matrix4, Mesh, SphereGeometry, Vector3} from 'three';
+import {Matrix4, Mesh, SphereGeometry, Texture, Vector3} from 'three';
 
 import {$scene} from '../../model-viewer-base.js';
 import {ModelViewerElement} from '../../model-viewer.js';
@@ -132,6 +132,39 @@ suite('ModelScene', () => {
       scene.setShadowOrbit(0, Math.PI / 2);
 
       expect((scene.shadow! as any).phi).to.be.equal(Math.PI / 2);
+    });
+  });
+
+  suite('skybox interpolation', () => {
+    test('fades out the previous skybox when decay is set', () => {
+      const firstSkybox = new Texture();
+      const secondSkybox = new Texture();
+
+      scene.setSkyboxInterpolationDecay(200);
+      scene.setEnvironmentAndSkybox(null, firstSkybox);
+      scene.setEnvironmentAndSkybox(null, secondSkybox);
+
+      const transition = (scene as any).skyboxTransition;
+      expect(scene.background).to.be.equal(secondSkybox);
+      expect(transition.parent).to.be.equal(scene.target);
+      expect(transition.material.map).to.be.equal(firstSkybox);
+      expect(transition.material.opacity).to.be.equal(1);
+
+      scene.updateSkyboxTransition(16);
+
+      expect(transition.material.opacity).to.be.greaterThan(0);
+      expect(transition.material.opacity).to.be.lessThan(1);
+    });
+
+    test('changes skybox immediately by default', () => {
+      const firstSkybox = new Texture();
+      const secondSkybox = new Texture();
+
+      scene.setEnvironmentAndSkybox(null, firstSkybox);
+      scene.setEnvironmentAndSkybox(null, secondSkybox);
+
+      expect(scene.background).to.be.equal(secondSkybox);
+      expect((scene as any).skyboxTransition).to.be.null;
     });
   });
 
