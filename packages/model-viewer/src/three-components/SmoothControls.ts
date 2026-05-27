@@ -715,7 +715,12 @@ export class SmoothControls extends EventDispatcher<{
 
   private isSkyboxOnly(): boolean {
     const element = this.element as HTMLElement & {skyboxOnly?: boolean};
-    return element.skyboxOnly === true || element.hasAttribute('skybox-only');
+    const root = element.getRootNode();
+    const host = root instanceof ShadowRoot ?
+        root.host as HTMLElement & {skyboxOnly?: boolean} :
+        null;
+    return element.skyboxOnly === true || element.hasAttribute('skybox-only') ||
+        host?.skyboxOnly === true || host?.hasAttribute('skybox-only') === true;
   }
 
   private shouldHandleZoom(): boolean {

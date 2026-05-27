@@ -262,8 +262,8 @@ suite('Controls', () => {
 
     test('skybox-only wheel changes FOV when zoom is disabled', async () => {
       element.cameraControls = true;
-      element.skyboxOnly = true;
       element.disableZoom = true;
+      element.skyboxOnly = true;
       element.fieldOfView = '90deg';
       element.jumpCameraToGoal();
       await element.updateComplete;
