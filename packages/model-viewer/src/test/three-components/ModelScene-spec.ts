@@ -168,6 +168,17 @@ suite('ModelScene', () => {
       expect(scene.background).to.be.equal(secondSkybox);
       expect((scene as any).skyboxTransition).to.be.null;
     });
+
+    test('does not fade in the initial skybox in skybox-only mode', () => {
+      const firstSkybox = new Texture();
+
+      element.skyboxOnly = true;
+      scene.setSkyboxInterpolationDecay(200);
+      scene.setEnvironmentAndSkybox(null, firstSkybox);
+
+      expect(scene.background).to.be.equal(firstSkybox);
+      expect((scene as any).skyboxTransition).to.be.null;
+    });
   });
 
   suite('setSize', () => {

@@ -260,20 +260,21 @@ suite('Controls', () => {
       expect(element.getCameraOrbit().theta).to.be.closeTo(0, 0.00001);
     });
 
-    test('skybox-only wheel changes FOV when zoom is disabled', async () => {
+    test('skybox-only wheel does not change FOV when zoom is disabled', async () => {
       element.cameraControls = true;
       element.disableZoom = true;
       element.skyboxOnly = true;
       element.fieldOfView = '90deg';
       element.jumpCameraToGoal();
       await element.updateComplete;
+      await until(() => Math.abs(element.getFieldOfView() - 90) < 0.001);
 
       const fov = element.getFieldOfView();
       element.zoom(-1);
       await rafPasses();
       await rafPasses();
 
-      expect(element.getFieldOfView()).to.be.greaterThan(fov);
+      expect(element.getFieldOfView()).to.be.eq(fov);
     });
 
     test('changes FOV basis when aspect ratio changes', async () => {

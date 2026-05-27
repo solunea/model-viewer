@@ -70,7 +70,7 @@ export const DEFAULT_OPTIONS = Object.freeze<SmoothControlsOptions>({
 // Constants
 const KEYBOARD_ORBIT_INCREMENT = Math.PI / 8;
 const ZOOM_SENSITIVITY = 0.04;
-const SKYBOX_ONLY_ZOOM_MULTIPLIER = 2;
+const SKYBOX_ONLY_ZOOM_MULTIPLIER = 0.25;
 const FPS_LOOK_SENSITIVITY = 0.002;
 const FPS_DRAG_MOVE_SENSITIVITY = 0.04;
 const FPS_MOVE_SPEED = 4;
@@ -729,7 +729,7 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private shouldHandleZoom(): boolean {
-    return !this._disableZoom || this.isSkyboxOnly();
+    return !this._disableZoom;
   }
 
   private updateWheelZoomListener() {
@@ -951,8 +951,7 @@ export class SmoothControls extends EventDispatcher<{
       }
 
       const {touchAction} = this._options;
-      if (this._disableZoom && !this.isSkyboxOnly() &&
-          touchAction !== 'none') {
+      if (this._disableZoom && touchAction !== 'none') {
         style.touchAction = 'manipulation';
       } else {
         style.touchAction = touchAction!;
@@ -991,6 +990,10 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private userAdjustZoom(deltaZoom: number) {
+    if (!this.shouldHandleZoom()) {
+      return;
+    }
+
     if (this.isSkyboxOnly()) {
       this.setFieldOfView(Math.exp(
           this.goalLogFov + deltaZoom * SKYBOX_ONLY_ZOOM_MULTIPLIER *
@@ -1337,6 +1340,10 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private onWheel = (event: Event) => {
+    if (!this.shouldHandleZoom()) {
+      return;
+    }
+
     if (this._mode === ControlMode.FPS) {
       this.changeSource = ChangeSource.USER_INTERACTION;
       const wheelEvent = event as WheelEvent;

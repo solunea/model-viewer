@@ -609,7 +609,13 @@ export class ModelScene extends Scene {
 
   private shouldTransitionSkybox(
       previousSkybox: Texture|null, nextSkybox: Texture|null) {
+    const isInitialSkybox = previousSkybox == null && nextSkybox != null;
+    const isSkyboxOnly =
+        this.element.skyboxOnly === true ||
+        this.element.hasAttribute('skybox-only');
+
     return this.skyboxInterpolationDecay > 0 &&
+        (!isSkyboxOnly || !isInitialSkybox) &&
         (previousSkybox != null || nextSkybox != null) &&
         previousSkybox !== nextSkybox;
   }

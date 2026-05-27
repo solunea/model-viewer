@@ -483,6 +483,9 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
     }
 
     zoom(keyPresses: number) {
+      if (this.disableZoom) {
+        return;
+      }
       const event = new WheelEvent('wheel', {deltaY: -30 * keyPresses});
       this[$userInputElement].dispatchEvent(event);
     }
