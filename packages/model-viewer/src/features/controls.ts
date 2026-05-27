@@ -977,9 +977,7 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       this.requestUpdate('maxCameraOrbit', this.maxCameraOrbit);
       this.requestUpdate('cameraOrbit', this.cameraOrbit);
       this.requestUpdate('cameraTarget', this.cameraTarget);
-      if (!this.skyboxOnly) {
-        this.jumpCameraToGoal();
-      }
+      this.jumpCameraToGoal();
     }
 
     [$cancelPrompts] = () => {
