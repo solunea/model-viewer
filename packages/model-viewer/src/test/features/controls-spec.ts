@@ -772,6 +772,30 @@ suite('Controls', () => {
         expect(oldTarget.z).to.be.closeTo(target.z, 0.001, 'Z recenter');
       });
 
+      test('skybox-only tap does not recenter or zoom', async () => {
+        (element as ModelViewerElement).skyboxOnly = true;
+        await element.updateComplete;
+
+        element.cameraOrbit = '45deg 90deg 0.001m';
+        element.fieldOfView = '45deg';
+        await element.updateComplete;
+        element.jumpCameraToGoal();
+        await rafPasses();
+
+        const orbit = element.getCameraOrbit();
+        const fov = element.getFieldOfView();
+
+        element.interact(50, tap(0));
+        await rafPasses();
+        await timePasses(50);
+        await rafPasses();
+        element.jumpCameraToGoal();
+        await element.updateComplete;
+
+        expectSphericalsToBeEqual(element.getCameraOrbit(), orbit);
+        expect(element.getFieldOfView()).to.be.closeTo(fov, 0.00001);
+      });
+
       test('tap does not move the model with disable-tap is set', async () => {
         element.disableTap = true;
         await element.updateComplete;

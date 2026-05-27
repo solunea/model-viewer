@@ -70,6 +70,7 @@ export const DEFAULT_OPTIONS = Object.freeze<SmoothControlsOptions>({
 // Constants
 const KEYBOARD_ORBIT_INCREMENT = Math.PI / 8;
 const ZOOM_SENSITIVITY = 0.04;
+const SKYBOX_ONLY_ZOOM_MULTIPLIER = 2;
 const FPS_LOOK_SENSITIVITY = 0.002;
 const FPS_DRAG_MOVE_SENSITIVITY = 0.04;
 const FPS_MOVE_SPEED = 4;
@@ -571,6 +572,10 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private recenterFromViewCenter(pointer: {clientX: number, clientY: number}) {
+    if (this.isSkyboxOnly()) {
+      return;
+    }
+
     if (performance.now() > this.startTime + TAP_MS ||
         Math.abs(pointer.clientX - this.startPointerPosition.clientX) >
             TAP_DISTANCE ||
@@ -985,6 +990,17 @@ export class SmoothControls extends EventDispatcher<{
         deltaZoom * this.inputSensitivity);
   }
 
+  private userAdjustZoom(deltaZoom: number) {
+    if (this.isSkyboxOnly()) {
+      this.setFieldOfView(Math.exp(
+          this.goalLogFov + deltaZoom * SKYBOX_ONLY_ZOOM_MULTIPLIER *
+              this.inputSensitivity));
+      return;
+    }
+
+    this.userAdjustOrbit(0, 0, deltaZoom);
+  }
+
   // Wraps to between -pi and pi
   private wrapAngle(radians: number): number {
     const normalized = (radians + Math.PI) / (2 * Math.PI);
@@ -1013,7 +1029,7 @@ export class SmoothControls extends EventDispatcher<{
           (this.lastSeparation - touchDistance) * 50 / this.scene.height;
       this.lastSeparation = touchDistance;
 
-      this.userAdjustOrbit(0, 0, deltaZoom);
+      this.userAdjustZoom(deltaZoom);
     }
 
     if (this.panPerPixel > 0) {
@@ -1093,6 +1109,10 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private recenter(pointer: PointerEvent) {
+    if (this.isSkyboxOnly()) {
+      return;
+    }
+
     if (performance.now() > this.startTime + TAP_MS ||
         Math.abs(pointer.clientX - this.startPointerPosition.clientX) >
             TAP_DISTANCE ||
@@ -1118,6 +1138,10 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private resetRadius() {
+    if (this.isSkyboxOnly()) {
+      return;
+    }
+
     const {scene} = this;
 
     const hit = scene.positionAndNormalFromPoint(vector2.set(0, 0));
@@ -1338,7 +1362,7 @@ export class SmoothControls extends EventDispatcher<{
     const deltaZoom = (event as WheelEvent).deltaY *
         ((event as WheelEvent).deltaMode == 1 ? 18 : 1) * ZOOM_SENSITIVITY *
         this.zoomSensitivity / 30;
-    this.userAdjustOrbit(0, 0, deltaZoom);
+    this.userAdjustZoom(deltaZoom);
 
     event.preventDefault();
     this.dispatchEvent({type: 'user-interaction'});
@@ -1383,11 +1407,10 @@ export class SmoothControls extends EventDispatcher<{
     let relevantKey = true;
     switch (event.key) {
       case 'PageUp':
-        this.userAdjustOrbit(0, 0, ZOOM_SENSITIVITY * this.zoomSensitivity);
+        this.userAdjustZoom(ZOOM_SENSITIVITY * this.zoomSensitivity);
         break;
       case 'PageDown':
-        this.userAdjustOrbit(
-            0, 0, -1 * ZOOM_SENSITIVITY * this.zoomSensitivity);
+        this.userAdjustZoom(-1 * ZOOM_SENSITIVITY * this.zoomSensitivity);
         break;
       case 'ArrowUp':
         this.userAdjustOrbit(0, -KEYBOARD_ORBIT_INCREMENT, 0);
