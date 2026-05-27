@@ -546,6 +546,7 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
         this.requestUpdate('maxCameraOrbit');
         this.requestUpdate('minFieldOfView');
         this.requestUpdate('maxFieldOfView');
+        controls.updateZoomControls();
         this[$syncSkyboxOnlyCamera]();
       }
 

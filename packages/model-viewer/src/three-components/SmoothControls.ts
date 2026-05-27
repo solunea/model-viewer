@@ -369,7 +369,7 @@ export class SmoothControls extends EventDispatcher<{
       element.addEventListener('pointerdown', this.onPointerDown);
       element.addEventListener('pointercancel', this.onPointerUp);
 
-      if (!this._disableZoom) {
+      if (this.shouldHandleZoom()) {
         element.addEventListener('wheel', this.onWheel);
       }
       element.addEventListener('keydown', this.onKeyDown);
@@ -671,14 +671,15 @@ export class SmoothControls extends EventDispatcher<{
   set disableZoom(disable: boolean) {
     if (this._disableZoom != disable) {
       this._disableZoom = disable;
-      if (disable === true) {
-        this.element.removeEventListener('wheel', this.onWheel);
-      } else {
-        this.element.addEventListener('wheel', this.onWheel);
-      }
+      this.updateWheelZoomListener();
 
       this.updateTouchActionStyle();
     }
+  }
+
+  updateZoomControls() {
+    this.updateWheelZoomListener();
+    this.updateTouchActionStyle();
   }
 
   /**
@@ -710,6 +711,22 @@ export class SmoothControls extends EventDispatcher<{
     // polar, azimuth and radius:
     this.setOrbit();
     this.setFieldOfView(Math.exp(this.goalLogFov));
+  }
+
+  private isSkyboxOnly(): boolean {
+    const element = this.element as HTMLElement & {skyboxOnly?: boolean};
+    return element.skyboxOnly === true || element.hasAttribute('skybox-only');
+  }
+
+  private shouldHandleZoom(): boolean {
+    return !this._disableZoom || this.isSkyboxOnly();
+  }
+
+  private updateWheelZoomListener() {
+    this.element.removeEventListener('wheel', this.onWheel);
+    if (this._interactionEnabled && this.shouldHandleZoom()) {
+      this.element.addEventListener('wheel', this.onWheel);
+    }
   }
 
   /**
@@ -924,7 +941,8 @@ export class SmoothControls extends EventDispatcher<{
       }
 
       const {touchAction} = this._options;
-      if (this._disableZoom && touchAction !== 'none') {
+      if (this._disableZoom && !this.isSkyboxOnly() &&
+          touchAction !== 'none') {
         style.touchAction = 'manipulation';
       } else {
         style.touchAction = touchAction!;
@@ -983,7 +1001,7 @@ export class SmoothControls extends EventDispatcher<{
   }
 
   private touchModeZoom: TouchMode = (dx: number, dy: number) => {
-    if (!this._disableZoom) {
+    if (this.shouldHandleZoom()) {
       const touchDistance =
           this.twoTouchDistance(this.pointers[0], this.pointers[1]);
       const deltaZoom = ZOOM_SENSITIVITY * this.zoomSensitivity *
@@ -1255,7 +1273,7 @@ export class SmoothControls extends EventDispatcher<{
     if (this.pointers.length === 1) {
       this.touchMode = this.touchModeRotate;
     } else {
-      if (this._disableZoom) {
+      if (!this.shouldHandleZoom()) {
         this.touchMode = null;
         this.element.removeEventListener('touchmove', this.disableScroll);
         return;
