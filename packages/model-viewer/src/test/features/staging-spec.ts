@@ -111,6 +111,24 @@ suite('Staging', () => {
         expect(element.getCameraOrbit().theta).to.be.greaterThan(orbit.theta);
       });
 
+      test('does not overwrite skybox orbit goals at zero rotation rate',
+          async () => {
+            element.skyboxOnly = true;
+            element.autoRotateDelay = 0;
+            element.rotationPerSecond = '0deg';
+            element.cameraOrbit = '0deg 90deg 0.001m';
+            element.jumpCameraToGoal();
+            await element.updateComplete;
+
+            element.cameraOrbit = '90deg 90deg 0.001m';
+            await element.updateComplete;
+            await timePasses(50);
+            await rafPasses();
+            await rafPasses();
+
+            expect(element.getCameraOrbit().theta).to.be.greaterThan(0);
+          });
+
       test.skip('pauses rotate after user interaction', async () => {
         const {turntableRotation} = element;
         await timePasses(AUTO_ROTATE_DELAY);

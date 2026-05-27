@@ -244,6 +244,22 @@ suite('Controls', () => {
       expect(element.getFieldOfView()).to.be.closeTo(100, 0.00001);
     });
 
+    test('skybox-only constraint changes do not jump camera orbit', async () => {
+      element.skyboxOnly = true;
+      element.cameraOrbit = '0deg 90deg 0.001m';
+      element.jumpCameraToGoal();
+      await rafPasses();
+
+      element.cameraOrbit = '90deg 90deg 0.001m';
+      element.minCameraOrbit = 'auto auto 0.002m';
+      element.maxCameraOrbit = 'auto auto 0.003m';
+      element.minFieldOfView = '10deg';
+      element.maxFieldOfView = '120deg';
+      await element.updateComplete;
+
+      expect(element.getCameraOrbit().theta).to.be.closeTo(0, 0.00001);
+    });
+
     test('changes FOV basis when aspect ratio changes', async () => {
       const fov = element.getFieldOfView();
       expect(fov).to.be.closeTo(DEFAULT_FOV_DEG, .001);

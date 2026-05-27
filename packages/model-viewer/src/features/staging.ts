@@ -111,7 +111,7 @@ export const StagingMixin = <T extends Constructor<ModelViewerElementBase>>(
       const rotationDelta = Math.min(
           delta, time - this[$autoRotateStartTime] - this.autoRotateDelay);
 
-      if (rotationDelta > 0) {
+      if (rotationDelta > 0 && this[$radiansPerSecond] !== 0) {
         const skyboxControls = this as unknown as SkyboxOnlyControls;
         if (skyboxControls.skyboxOnly === true &&
             typeof skyboxControls.getCameraOrbit === 'function') {
