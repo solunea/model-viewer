@@ -568,15 +568,42 @@ export class ModelScene extends Scene {
     if (this.element[$renderer].arRenderer.presentedScene === this) {
       return;
     }
+    const previousEnvironment = this.environment;
     const previousSkybox = this.currentSkybox();
+    const shouldTransitionSkybox =
+        this.shouldTransitionSkybox(previousSkybox, skybox);
     this.environment = environment;
-    if (this.shouldTransitionSkybox(previousSkybox, skybox)) {
+    if (shouldTransitionSkybox) {
       this.startSkyboxTransition(previousSkybox, skybox);
     } else {
       this.clearSkyboxTransition();
       this.setBackground(skybox);
     }
+    this.disposeReplacedTransientTextures(
+        [previousEnvironment, previousSkybox],
+        shouldTransitionSkybox ?
+            [environment, skybox, previousSkybox] :
+            [environment, skybox]);
     this.queueRender();
+  }
+
+  private disposeReplacedTransientTextures(
+      previousTextures: Array<Texture|null>, retainedTextures: Array<Texture|null>) {
+    const retained = new Set(retainedTextures.filter(
+        (texture): texture is Texture => texture != null));
+    const disposed = new Set<Texture>();
+
+    for (const texture of previousTextures) {
+      if (texture == null || retained.has(texture) || disposed.has(texture)) {
+        continue;
+      }
+
+      const name = texture.name || '';
+      if (/^(blob:|data:)/i.test(name)) {
+        texture.dispose();
+        disposed.add(texture);
+      }
+    }
   }
 
   private currentSkybox(): Texture|null {

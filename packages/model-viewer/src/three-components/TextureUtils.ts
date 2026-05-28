@@ -32,6 +32,7 @@ const GENERATED_SIGMA = 0.04;
 const MAX_SAMPLES = 20;
 
 const HDR_FILE_RE = /\.hdr(\.js)?$/;
+const TRANSIENT_URL_RE = /^(blob:|data:)/i;
 
 export default class TextureUtils {
   public lottieLoaderUrl = '';
@@ -183,8 +184,7 @@ export default class TextureUtils {
           environmentMapUrl, withCredentials, progressCallback);
     } else if (!!skyboxUrl) {
       // Fallback to deriving the environment map from an available skybox
-      environmentMapLoads = this.loadEquirectFromUrl(
-          skyboxUrl, withCredentials, progressCallback);
+      environmentMapLoads = skyboxLoads as Promise<Texture>;
     } else {
       // Fallback to generating the environment map
       environmentMapLoads = useAltEnvironment ?
@@ -208,6 +208,10 @@ export default class TextureUtils {
   private async loadEquirectFromUrl(
       url: string, withCredentials: boolean,
       progressCallback: (progress: number) => void): Promise<Texture> {
+    if (TRANSIENT_URL_RE.test(url)) {
+      return this.loadEquirect(url, withCredentials, progressCallback);
+    }
+
     if (!this.skyboxCache.has(url)) {
       const skyboxMapLoads =
           this.loadEquirect(url, withCredentials, progressCallback);

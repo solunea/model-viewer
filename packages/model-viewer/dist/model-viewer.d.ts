@@ -663,6 +663,7 @@ declare class ModelScene extends Scene$1 {
         height: number;
     };
     setEnvironmentAndSkybox(environment: Texture$4 | null, skybox: Texture$4 | null): void;
+    private disposeReplacedTransientTextures;
     private currentSkybox;
     setBackground(skybox: Texture$4 | null): void;
     setSkyboxInterpolationDecay(decayMilliseconds: number): void;
