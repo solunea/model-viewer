@@ -145,6 +145,8 @@ export default class TextureUtils {
         texture.colorSpace = SRGBColorSpace;
       }
 
+      this.threeRenderer.initTexture(texture);
+
       return texture;
 
     } finally {
