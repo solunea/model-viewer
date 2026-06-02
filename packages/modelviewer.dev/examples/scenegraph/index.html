@@ -58,7 +58,7 @@
       border-radius: 0.5rem;
       padding: 0.5rem 1rem;
       /* max-height: 14rem; */
-      overflow: auto;
+      overflow: visible;
     }
 
     #texture-name,
@@ -71,6 +71,7 @@
       margin: 0 0.25em;
     }
   </style>
+  <script type="module" src="./custom-select.js"></script>
 </head>
 
 <body>
@@ -102,7 +103,7 @@
                   src="../../shared-assets/models/glTF-Sample-Assets/Models/MaterialsVariantsShoe/glTF-Binary/MaterialsVariantsShoe.glb"
                   ar alt="A 3D model of a Shoe">
                   <div class="controls glass">
-                    <div>Variant: <select id="variant"></select></div>
+                    <div>Variant: <custom-select id="variant"></custom-select></div>
                   </div>
                 </model-viewer>
                 <script>
@@ -156,20 +157,63 @@
                 <code>ios-src</code> is not specified, since in this case a USDZ
                 will be generated on the fly from the current state.
               </p>
+              <p><b>Tip:</b> When building custom interactive overlay controls with text or numeric input fields on mobile, ensure your inputs are styled with a CSS rule setting <code>font-size: 16px;</code> (or larger). If a focused text field's computed font size is below 16px, mobile WebKit browsers (like iOS Safari and Chrome) will automatically zoom in the entire viewport, which does not automatically reset when the input is blurred and can break the page layout.</p>
+              <p><b>AR Keyboard Overlays:</b> Inside a WebXR full-screen immersive AR session, mobile browsers do not shrink the layout viewport when a software virtual keyboard is open. To prevent inputs from being covered by the keyboard, you can register a <code>visualViewport</code> resize listener (only active when <code>ar-status="session-started"</code>) to calculate the soft keyboard's overlay height and dynamically translate your overlay container upward (e.g., via <code>transform: translateY(-offset px);</code>), as demonstrated in the script below.</p>
             </div>
             <example-snippet stamp-to="transforms" highlight-as="html">
               <template>
+                <style>
+                  model-viewer#transform {
+                    container-type: size;
+                  }
+                  .custom-ar-button {
+                    position: absolute;
+                    top: 16px;
+                    right: 16px;
+                    background-color: white;
+                    border: 1px solid #dadce0;
+                    border-radius: 4px;
+                    padding: 8px 12px;
+                    font-weight: 500;
+                    font-size: 14px;
+                    color: #1a73e8;
+                    box-shadow: 0 2px 4px rgba(0,0,0,.1);
+                    cursor: pointer;
+                    z-index: 10;
+                    transform: translateY(calc(100cqh - 100% - 32px));
+                    transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+                  }
+                  @container (max-width: 700px) {
+                    .custom-ar-button {
+                      transform: translateY(0px);
+                    }
+                  }
+                  .controls input.number {
+                    width: 40px;
+                  }
+                  /* Hide spin-button for Chrome, Safari, Edge, Opera */
+                  .controls input::-webkit-outer-spin-button,
+                  .controls input::-webkit-inner-spin-button {
+                    -webkit-appearance: none;
+                    margin: 0;
+                  }
+                  /* Hide spin-button for Firefox */
+                  .controls input[type=number] {
+                    -moz-appearance: textfield;
+                  }
+                </style>
                 <model-viewer id="transform" orientation="20deg 0 0" shadow-intensity="1" camera-controls
                   touch-action="pan-y" ar src="../../shared-assets/models/Astronaut.glb"
                   alt="A 3D model of an astronaut">
+                  <button slot="ar-button" class="custom-ar-button">View in AR</button>
                   <div class="controls glass">
-                    <div>Roll: <input id="roll" value="20" size="3" class="number"> degrees</div>
-                    <div>Pitch: <input id="pitch" value="0" size="3" class="number"> degrees</div>
-                    <div>Yaw: <input id="yaw" value="0" size="3" class="number"> degrees</div>
+                    <div>Roll: <input type="number" step="any" inputmode="decimal" id="roll" value="20" size="3" class="number" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false"> degrees</div>
+                    <div>Pitch: <input type="number" step="any" inputmode="decimal" id="pitch" value="0" size="3" class="number" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false"> degrees</div>
+                    <div>Yaw: <input type="number" step="any" inputmode="decimal" id="yaw" value="0" size="3" class="number" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false"> degrees</div>
                     <div>
-                      Scale: X: <input id="x" value="1" size="3" class="number">,
-                      Y: <input id="y" value="1" size="3" class="number">,
-                      Z: <input id="z" value="1" size="3" class="number">
+                      Scale: X: <input type="number" step="any" inputmode="decimal" id="x" value="1" size="3" class="number" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">,
+                      Y: <input type="number" step="any" inputmode="decimal" id="y" value="1" size="3" class="number" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">,
+                      Z: <input type="number" step="any" inputmode="decimal" id="z" value="1" size="3" class="number" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
                     </div>
                     <button id="frame">Update Framing</button>
                   </div>
@@ -214,6 +258,28 @@
                   z.addEventListener('input', () => {
                     updateScale();
                   });
+
+                  const controls = modelViewerTransform.querySelector(".controls");
+                  if (window.visualViewport) {
+                    const updateControls = () => {
+                      if (modelViewerTransform.getAttribute('ar-status') !== 'session-started') {
+                        controls.style.transform = 'none';
+                        return;
+                      }
+                      const layoutHeight = window.innerHeight;
+                      const visualHeight = window.visualViewport.height;
+                      const offsetTop = window.visualViewport.offsetTop;
+                      const offset = layoutHeight - (visualHeight + offsetTop);
+                      if (offset > 0) {
+                        controls.style.transform = `translateY(-${offset}px)`;
+                      } else {
+                        controls.style.transform = 'none';
+                      }
+                    };
+                    window.visualViewport.addEventListener('resize', updateControls);
+                    window.visualViewport.addEventListener('scroll', updateControls);
+                    modelViewerTransform.addEventListener('ar-status', updateControls);
+                  }
                 </script>
               </template>
             </example-snippet>
@@ -339,7 +405,7 @@
                   alt="A 3D model of a duck">
                   <div class="controls glass">
                     <p>Normals</p>
-                    <select id="normals2">
+                    <custom-select id="normals2">
                       <option>None</option>
                       <option
                         value="../../shared-assets/models/glTF-Sample-Assets/Models/DamagedHelmet/glTF/Default_normal.jpg">
@@ -350,7 +416,7 @@
                       <option
                         value="../../shared-assets/models/glTF-Sample-Assets/Models/WaterBottle/glTF/WaterBottle_normal.png">
                         Water Bottle</option>
-                    </select>
+                    </custom-select>
                     <p>Custom texture name</p>
                     <p id="texture-name">None</p>
                     <p>Image name from file name</p>
@@ -415,9 +481,9 @@
                   src="../../shared-assets/models/glTF-Sample-Assets/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb"
                   ar alt="A 3D model of a helmet">
                   <div class="controls glass">
-                    <div>
+                     <div>
                       <p>Diffuse</p>
-                      <select id="diffuse">
+                      <custom-select id="diffuse">
                         <option
                           value="../../shared-assets/models/glTF-Sample-Assets/Models/DamagedHelmet/glTF/Default_albedo.jpg">
                           Damaged helmet</option>
@@ -427,11 +493,11 @@
                         <option
                           value="../../shared-assets/models/glTF-Sample-Assets/Models/WaterBottle/glTF/WaterBottle_baseColor.png">
                           Water Bottle</option>
-                      </select>
+                      </custom-select>
                     </div>
                     <div>
                       <p>Metallic-roughness</p>
-                      <select id="metallicRoughness">
+                      <custom-select id="metallicRoughness">
                         <option
                           value="../../shared-assets/models/glTF-Sample-Assets/Models/DamagedHelmet/glTF/Default_metalRoughness.jpg">
                           Damaged helmet</option>
@@ -441,11 +507,11 @@
                         <option
                           value="../../shared-assets/models/glTF-Sample-Assets/Models/WaterBottle/glTF/WaterBottle_occlusionRoughnessMetallic.png">
                           Water Bottle</option>
-                      </select>
+                      </custom-select>
                     </div>
                     <div>
                       <p>Normals</p>
-                      <select id="normals">
+                      <custom-select id="normals">
                         <option
                           value="../../shared-assets/models/glTF-Sample-Assets/Models/DamagedHelmet/glTF/Default_normal.jpg">
                           Damaged helmet</option>
@@ -455,22 +521,22 @@
                         <option
                           value="../../shared-assets/models/glTF-Sample-Assets/Models/WaterBottle/glTF/WaterBottle_normal.png">
                           Water Bottle</option>
-                      </select>
+                      </custom-select>
                     </div>
                     <div>
                       <p>Occlusion</p>
-                      <select id="occlusion">
+                      <custom-select id="occlusion">
                         <option
                           value="../../shared-assets/models/glTF-Sample-Assets/Models/DamagedHelmet/glTF/Default_AO.jpg">
                           Damaged helmet</option>
                         <option
                           value="../../shared-assets/models/glTF-Sample-Assets/Models/WaterBottle/glTF/WaterBottle_occlusionRoughnessMetallic.png">
                           Water Bottle</option>
-                      </select>
+                      </custom-select>
                     </div>
                     <div>
                       <p>Emission</p>
-                      <select id="emission">
+                      <custom-select id="emission">
                         <option
                           value="../../shared-assets/models/glTF-Sample-Assets/Models/DamagedHelmet/glTF/Default_emissive.jpg">
                           Damaged helmet</option>
@@ -480,7 +546,7 @@
                         <option
                           value="../../shared-assets/models/glTF-Sample-Assets/Models/WaterBottle/glTF/WaterBottle_emissive.png">
                           Water Bottle</option>
-                      </select>
+                      </custom-select>
                     </div>
                   </div>
                 </model-viewer>
@@ -552,11 +618,11 @@
                     <p>Offset</p>
                     <input type="range" min="0" max="1" value="0" step="0.01" id="offsetSlider">
                     <p>WrapMode</p>
-                    <select id="wrapMode">
+                    <custom-select id="wrapMode">
                       <option value="10497">Repeat</option>
                       <option value="33071">ClampToEdge</option>
                       <option value="33648">MirroredRepeat</option>
-                    </select>
+                    </custom-select>
                   </div>
                 </model-viewer>
                 <script type="module">
@@ -626,10 +692,10 @@
                   src="../../shared-assets/models/manifold.glb" ar alt="A 3D model of a stick and ball">
                   <div class="controls glass">
                     <div>Mesh Variants:
-                      <select id="textures">
+                      <custom-select id="textures">
                         <option value="ball">ball</option>
                         <option value="stick">stick</option>
-                      </select>
+                      </custom-select>
                     </div>
                 </model-viewer>
                 <script type="module">
@@ -725,11 +791,11 @@
                   src="../../shared-assets/models/sphere.glb" ar alt="A 3D model of a duck">
                   <div class="controls glass">
                     <p>Texture Type</p>
-                    <select id="type">
+                    <custom-select id="type">
                       <option value="lottie">Lottie</option>
                       <option value="video">Video</option>
                       <option value="canvas">Canvas</option>
-                    </select>
+                    </custom-select>
                   </div>
                 </model-viewer>
                 <script type="module">
@@ -1288,6 +1354,7 @@
           </div>
         </div>
       </div>
+
 
       <div class="footer">
         <ul>

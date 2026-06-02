@@ -67,6 +67,8 @@ export const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
 export const IS_OCULUS = /OculusBrowser/.test(navigator.userAgent);
 export const IS_IOS_CHROME = IS_IOS && /CriOS\//.test(navigator.userAgent);
 export const IS_IOS_SAFARI = IS_IOS && IS_SAFARI;
+export const IS_IOS_THIRDPARTY = IS_IOS && /CriOS\/|EdgiOS\/|FxiOS\/|GSA\/|DuckDuckGo\//.test(navigator.userAgent);
+export const IS_IOS_GSA = IS_IOS && /GSA\//.test(navigator.userAgent);
 
 export const IS_SCENEVIEWER_CANDIDATE = IS_ANDROID && !IS_FIREFOX && !IS_OCULUS;
 
@@ -88,15 +90,13 @@ export const IS_WKWEBVIEW =
 // (DuckDuckGo). All other iOS browsers / apps will fail by default.
 export const IS_AR_QUICKLOOK_CANDIDATE = (() => {
   if (IS_IOS) {
-    if (!IS_WKWEBVIEW) {
-      const tempAnchor = document.createElement('a');
-      return Boolean(
-          tempAnchor.relList && tempAnchor.relList.supports &&
-          tempAnchor.relList.supports('ar'));
-    } else {
-      return Boolean(/CriOS\/|EdgiOS\/|FxiOS\/|GSA\/|DuckDuckGo\//.test(
-          navigator.userAgent));
+    if (IS_IOS_THIRDPARTY) {
+      return true;
     }
+    const tempAnchor = document.createElement('a');
+    return Boolean(
+        tempAnchor.relList && tempAnchor.relList.supports &&
+        tempAnchor.relList.supports('ar'));
   } else {
     return false;
   }

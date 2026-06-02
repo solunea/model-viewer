@@ -261,6 +261,9 @@ export class ARRenderer extends EventDispatcher<
     // This sets isPresenting to true
     this._presentedScene = scene;
     this.overlay = scene.element.shadowRoot!.querySelector('div.default');
+    if (this.overlay != null) {
+      this.overlay.addEventListener('beforexrselect', this.onBeforeXRSelect);
+    }
 
     if (environmentEstimation === true) {
       this.xrLight = new XREstimatedLight(this.threeRenderer);
@@ -445,7 +448,7 @@ export class ARRenderer extends EventDispatcher<
     const intersection =
         this.placementBox!.controllerIntersection(scene, controller);
     if (intersection != null) {
-      const bbox = new Box3().setFromObject(scene.pivotNode);
+      const bbox = new Box3().setFromObject(scene.scenePivot);
       const footprintY = bbox.min.y +
           FOOTPRINT__INTERSECT_THRESHOLD;  // Small threshold above base
 
@@ -456,11 +459,11 @@ export class ARRenderer extends EventDispatcher<
           this.selectedXRController.userData.line.visible = false;
           if (scene.canScale && this.isWorldSpaceReady()) {
             this.isTwoHandInteraction = true;
-            this.firstRatio = this.controllerSeparation() / scene.pivotNode.scale.x;
+            this.firstRatio = this.controllerSeparation() / scene.scenePivot.scale.x;
             this.scaleLine.visible = true;
           }
         } else {
-          controller.attach(scene.pivotNode);
+          controller.attach(scene.scenePivot);
         }
         this.selectedXRController = controller;
         scene.setShadowIntensity(0.01);
@@ -475,7 +478,7 @@ export class ARRenderer extends EventDispatcher<
             this.xrController2?.userData.isSelected) {
           if (scene.canScale && this.isWorldSpaceReady()) {
             this.isTwoHandInteraction = true;
-            this.firstRatio = this.controllerSeparation() / scene.pivotNode.scale.x;
+            this.firstRatio = this.controllerSeparation() / scene.scenePivot.scale.x;
             this.scaleLine.visible = true;
           }
         } else {
@@ -510,15 +513,16 @@ export class ARRenderer extends EventDispatcher<
     }
     const scene = this.presentedScene!;
     // drop on floor
-    scene.attach(scene.pivotNode);
+    scene.attach(scene.scenePivot);
     this.selectedXRController = null;
     this.goalYaw = Math.atan2(
-        scene.pivotNode.matrix.elements[8], scene.pivotNode.matrix.elements[10]);
-    this.goalPosition.x = scene.pivotNode.position.x;
-    this.goalPosition.z = scene.pivotNode.position.z;
+        scene.scenePivot.matrix.elements[8], scene.scenePivot.matrix.elements[10]);
+    this.goalPosition.x = scene.scenePivot.position.x;
+    this.goalPosition.z = scene.scenePivot.position.z;
+
     // For world-space mode after initial placement, preserve Y position
     if (this.isWorldSpaceReady()) {
-      this.goalPosition.y = scene.pivotNode.position.y;
+      this.goalPosition.y = scene.scenePivot.position.y;
     }
 
     const menuPanel = this.menuPanel;
@@ -586,16 +590,15 @@ export class ARRenderer extends EventDispatcher<
       this.placementBox!.setScreenSpaceMode(
           this.xrMode === XRMode.SCREEN_SPACE);
     }
-    if (this.isPresenting && this.xrMode !== XRMode.SCREEN_SPACE &&
-        this.presentedScene != null) {
+    if (this.xrMode !== XRMode.SCREEN_SPACE) {
       if (this.menuPanel) {
         this.menuPanel.dispose();
         this.menuPanel = null;
       }
       this.menuPanel = new XRMenuPanel();
-      this.presentedScene.add(this.menuPanel);
+      this.presentedScene!.add(this.menuPanel);
       this.menuPanel.updatePosition(
-          this.presentedScene.getCamera(), this.placementBox!);
+          this.presentedScene!.getCamera(), this.placementBox!);
     }
   };
 
@@ -632,10 +635,10 @@ export class ARRenderer extends EventDispatcher<
         this.menuPanel = null;
       }
 
-      scene.add(scene.pivotNode);
-      scene.pivotNode.quaternion.set(0, 0, 0, 1);
-      scene.pivotNode.position.set(0, 0, 0);
-      scene.pivotNode.scale.set(1, 1, 1);
+      scene.add(scene.scenePivot);
+      scene.scenePivot.quaternion.set(0, 0, 0, 1);
+      scene.scenePivot.position.set(0, 0, 0);
+      scene.scenePivot.scale.set(1, 1, 1);
       scene.setShadowOffset(0);
       const yaw = this.turntableRotation;
       if (yaw != null) {
@@ -712,7 +715,10 @@ export class ARRenderer extends EventDispatcher<
     this.oldShadowIntensity = null;
     this.frame = null;
     this.inputSource = null;
-    this.overlay = null;
+    if (this.overlay != null) {
+      this.overlay.removeEventListener('beforexrselect', this.onBeforeXRSelect);
+      this.overlay = null;
+    }
     this.worldSpaceInitialPlacementDone = false;
 
     if (this.resolveCleanup != null) {
@@ -753,8 +759,8 @@ export class ARRenderer extends EventDispatcher<
 
   private placeInitially() {
     const scene = this.presentedScene!;
-    const {pivotNode, element} = scene;
-    const {position} = pivotNode;
+    const {scenePivot, element} = scene;
+    const {position} = scenePivot;
     const xrCamera = scene.getCamera();
 
     const {width, height} = this.overlay!.getBoundingClientRect();
@@ -786,7 +792,8 @@ export class ARRenderer extends EventDispatcher<
 
       // Set initial position and scale immediately for world-space
       position.copy(optimalPosition);
-      pivotNode.scale.set(optimalScale, optimalScale, optimalScale);
+      scenePivot.scale.set(optimalScale, optimalScale, optimalScale);
+
       // Mark that initial placement is done
       this.worldSpaceInitialPlacementDone = true;
 
@@ -925,7 +932,7 @@ export class ARRenderer extends EventDispatcher<
       const {separation, angle} = this.fingerPolar(fingers);
       this.lastAngle = angle;  // Initialize lastAngle, do not update goalYaw
       if (this.firstRatio === 0) {
-        this.firstRatio = separation / scene.pivotNode.scale.x;
+        this.firstRatio = separation / scene.scenePivot.scale.x;
       }
       if (scene.canScale) {
         this.setScale(separation);
@@ -942,6 +949,22 @@ export class ARRenderer extends EventDispatcher<
     this.goalPosition.y +=
         this.placementBox!.offsetHeight * this.presentedScene!.scale.x;
     this.placementBox!.show = false
+  };
+
+  private onBeforeXRSelect = (event: Event) => {
+    const path = event.composedPath();
+    for (const element of path) {
+      if (element instanceof HTMLElement) {
+        const tagName = element.tagName.toLowerCase();
+        if (tagName === 'input' || tagName === 'button' ||
+            tagName === 'select' || tagName === 'textarea' ||
+            tagName === 'a' || element.hasAttribute('data-pointer-coalesce') ||
+            element.classList.contains('interactive')) {
+          event.preventDefault();
+          break;
+        }
+      }
+    }
   };
 
   private fingerPolar(fingers: XRTransientInputHitTestResult[]):
@@ -981,7 +1004,7 @@ export class ARRenderer extends EventDispatcher<
     }
     const fingers = frame.getHitTestResultsForTransientInput(hitSource);
     const scene = this.presentedScene!;
-    const scale = scene.pivotNode.scale.x;
+    const scale = scene.scenePivot.scale.x;
 
     // Robust two-finger gesture handling
     if (fingers.length === 2) {
@@ -1071,14 +1094,14 @@ export class ARRenderer extends EventDispatcher<
     }
   }
 
-  private applyXRControllerRotation(controller: XRController, pivot: Object3D) {
+  private applyXRControllerRotation(controller: XRController, scenePivot: Object3D) {
     if (!controller.userData.turning) {
       return;
     }
     const angle = (controller.position.x - controller.userData.initialX) *
         ROTATION_SENSIVITY;
     this.deltaRotation.setFromAxisAngle(AXIS_Y, angle);
-    pivot.quaternion.multiplyQuaternions(this.deltaRotation, pivot.quaternion);
+    scenePivot.quaternion.multiplyQuaternions(this.deltaRotation, scenePivot.quaternion);
   }
 
   private handleScalingInXR(scene: ModelScene, delta: number) {
@@ -1094,20 +1117,21 @@ export class ARRenderer extends EventDispatcher<
       this.scaleLine.scale.z = -dist;
       this.scaleLine.lookAt(this.xrController2.position);
     }
-    const oldScale = scene.pivotNode.scale.x;
+    const oldScale = scene.scenePivot.scale.x;
     if (this.goalScale !== oldScale) {
       const newScale =
           this.scaleDamper.update(oldScale, this.goalScale, delta, 1);
-      scene.pivotNode.scale.set(newScale, newScale, newScale);
+      scene.scenePivot.scale.set(newScale, newScale, newScale);
     }
   }
 
   private updatePivotPosition(scene: ModelScene, delta: number) {
-    const {pivotNode} = scene;
+    const {scenePivot} = scene;
     const box = this.placementBox!;
     const boundingRadius = scene.boundingSphere.radius;
     const goal = this.goalPosition;
-    const position = pivotNode.position;
+    const position = scenePivot.position;
+
     let source = ChangeSource.NONE;
     if (!goal.equals(position)) {
       source = ChangeSource.USER_INTERACTION;
@@ -1120,7 +1144,7 @@ export class ARRenderer extends EventDispatcher<
       if (this.xrMode === XRMode.SCREEN_SPACE && !this.isTranslating) {
         const offset = goal.y - y;
         if (this.placementComplete && this.placeOnWall === false) {
-          box.offsetHeight = offset / scene.pivotNode.scale.x;
+          box.offsetHeight = offset / scene.scenePivot.scale.x;
           scene.setShadowOffset(offset);
         } else if (offset === 0) {
           this.placementComplete = true;
@@ -1144,10 +1168,10 @@ export class ARRenderer extends EventDispatcher<
     // placement
     if (this.xrMode === XRMode.WORLD_SPACE &&
         !this.worldSpaceInitialPlacementDone &&
-        this.goalScale !== pivotNode.scale.x) {
+        this.goalScale !== scenePivot.scale.x) {
       const newScale =
-          this.scaleDamper.update(pivotNode.scale.x, this.goalScale, delta, 1);
-      pivotNode.scale.set(newScale, newScale, newScale);
+          this.scaleDamper.update(scenePivot.scale.x, this.goalScale, delta, 1);
+      scenePivot.scale.set(newScale, newScale, newScale);
     }
 
     scene.updateTarget(delta);
@@ -1159,9 +1183,9 @@ export class ARRenderer extends EventDispatcher<
   private updateYaw(scene: ModelScene, delta: number) {
     // yaw must be updated last, since this also updates the shadow position.
     quaternion.setFromAxisAngle(vector3.set(0, 1, 0), this.goalYaw);
-    const angle = scene.pivotNode.quaternion.angleTo(quaternion);
+    const angle = scene.scenePivot.quaternion.angleTo(quaternion);
     const angleStep = angle - this.yawDamper.update(angle, 0, delta, Math.PI);
-    scene.pivotNode.quaternion.rotateTowards(quaternion, angleStep);
+    scene.scenePivot.quaternion.rotateTowards(quaternion, angleStep);
   }
 
   private updateMenuPanel(scene: ModelScene, box: PlacementBox, delta: number) {
@@ -1173,15 +1197,15 @@ export class ARRenderer extends EventDispatcher<
 
   private applyXRInputToScene(delta: number) {
     const scene = this.presentedScene!;
-    const pivot = scene.pivotNode;
+    const scenePivot = scene.scenePivot;
     const box = this.placementBox!;
 
     this.updatePlacementBoxOpacity(box, delta);
     this.updateTwoHandInteractionState();
-    this.applyXRControllerRotations(pivot);
+    this.applyXRControllerRotations(scenePivot);
     this.handleScalingInXR(scene, delta);
 
-    if (pivot.parent !== scene) {
+    if (scenePivot.parent !== scene) {
       // attached to controller instead
       // when moving the model, the menu panel should disapear
       this.updateMenuPanel(scene, box, delta);
@@ -1215,12 +1239,12 @@ export class ARRenderer extends EventDispatcher<
     this.isTwoHandInteraction = !!bothSelected;
   }
 
-  private applyXRControllerRotations(pivot: Object3D) {
+  private applyXRControllerRotations(scenePivot: Object3D) {
     if (!this.isTwoHandInteraction) {
       if (this.xrController1)
-        this.applyXRControllerRotation(this.xrController1, pivot);
+        this.applyXRControllerRotation(this.xrController1, scenePivot);
       if (this.xrController2)
-        this.applyXRControllerRotation(this.xrController2, pivot);
+        this.applyXRControllerRotation(this.xrController2, scenePivot);
     }
   }
 

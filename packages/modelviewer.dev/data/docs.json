@@ -8,7 +8,7 @@
         "htmlName": "src",
         "description": "The URL to the 3D model. Only <a href=\"https://github.com/KhronosGroup/glTF/tree/master/specification/2.0\">glTF</a>/<a href=\"https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#glb-file-format-specification\">GLB</a> models are supported.",
         "links": [
-          "<a href=\"../examples/loading\">Related examples</a>"
+          "<a href=\"../examples/loading/\">Related examples</a>"
         ],
         "default": {
           "default": "empty string",
@@ -20,7 +20,7 @@
         "htmlName": "alt",
         "description": "Configures the model with custom text that will be used to describe the model to viewers who use a screen reader or otherwise depend on additional semantic context to understand what they are viewing.",
         "links": [
-          "<a href=\"../examples/loading\">Related examples</a>"
+          "<a href=\"../examples/loading/\">Related examples</a>"
         ],
         "default": {
           "default": "empty string",
@@ -32,7 +32,7 @@
         "htmlName": "poster",
         "description": "Displays an image instead of the model, useful for showing the user something before a model is loaded and ready to render.",
         "links": [
-          "<a href=\"../examples/loading\">Related examples</a>"
+          "<a href=\"../examples/loading/\">Related examples</a>"
         ],
         "default": {
           "default": "empty string",
@@ -44,7 +44,7 @@
         "htmlName": "loading",
         "description": "An enumerable attribute describing under what conditions the model should be preloaded. The supported values are \"auto\", \"lazy\" and \"eager\". Auto is equivalent to lazy, which loads the model when it is near the viewport for <span class='attribute'>reveal=\"auto\"</span>, and when interacted with for <span class='attribute'>reveal=\"interaction\"</span>. Eager loads the model immediately.",
         "links": [
-          "<a href=\"../examples/loading\">Related examples</a>"
+          "<a href=\"../examples/loading/\">Related examples</a>"
         ],
         "default": {
           "default": "auto",
@@ -56,7 +56,7 @@
         "htmlName": "reveal",
         "description": "This attribute controls when the model should be revealed. If <span class='attribute'>reveal</span> is set to \"auto\", the model will be revealed as soon as it is done loading and rendering. If <span class='attribute'>reveal</span> is set to \"manual\", the model will remain hidden until <span class='attribute'>dismissPoster()</span> is called.",
         "links": [
-          "<a href=\"../examples/loading\">Related examples</a>"
+          "<a href=\"../examples/loading/\">Related examples</a>"
         ],
         "default": {
           "default": "auto",
@@ -851,7 +851,7 @@
       {
         "name": "hotspot-*",
         "htmlName": "hotspot",
-        "description": "Any child element under <span class=\"attribute\">&lt;model-viewer&gt;</span> with a slot name starting with \"hotspot\" will be aligned with the 3D model using its <span class='attribute'>data-position</span> and <span class='attribute'>data-normal</span> attributes in model coordinates, in the same format as <span class='attribute'>camera-target</span>. Alternately, the <span class='attribute'>data-surface</span> attribute can be used to instead specify the glTF mesh, primitive, three vertex indices and three barycentric coordinates to specify a surface point that will animate along with the mesh. It is recommended to use the <a href=\"./#entrydocs-annotations-methods-surfaceFromPoint\">surfaceFromPoint</a> method to generate this string interactively. See the <a href=\"../examples/annotations/#animatedHotspots\">annotations example</a> for details."
+        "description": "Any child element under <span class=\"attribute\">&lt;model-viewer&gt;</span> with a slot name starting with \"hotspot\" will be aligned with the 3D model using its <span class='attribute'>data-position</span> and <span class='attribute'>data-normal</span> attributes in model coordinates, in the same format as <span class='attribute'>camera-target</span>. Alternately, the <span class='attribute'>data-surface</span> attribute can be used to specify a surface point that will animate along with the mesh. It is recommended to use the <a href=\"./#entrydocs-annotations-methods-surfaceFromPoint\">surfaceFromPoint</a> method to generate this string interactively."
       }
     ]
   },
@@ -1052,7 +1052,7 @@
       {
         "name": "play(options: {repetitions, pingpong})",
         "htmlName": "play",
-        "description": "Causes animations to be played. You can specify the number of repetitions of the animation by setting the number of <i>repetitions</i> to any value greater than 0 (defaults to Infinity). Also if you set <i>pingpong</i> to true, alternately playing forward and backward (defaults to false). Use the autoplay attribute if you want animations to be played automatically. If there are no animations, nothing will happen, so make sure that the model is loaded before invoking this method."
+        "description": "Causes animations to be played. You can specify the number of repetitions of the animation by setting the number of <i>repetitions</i> to any value greater than 0 (defaults to Infinity). Also if you set <i>pingpong</i> to true, alternately playing forward and backward (defaults to false). Use the autoplay attribute if you want animations to be played automatically."
       },
       {
         "name": "pause()",

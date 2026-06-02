@@ -9,11 +9,11 @@ jobs:
     timeout-minutes: 60
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: true
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v6
 
     - name: NPM install
       run: npm ci
@@ -28,6 +28,4 @@ jobs:
       run: npm run build
 
     - name: Unit tests
-      uses: coactions/setup-xvfb@v1
-      with:
-        run: npm run test:ci
+      run: npm run test:ci

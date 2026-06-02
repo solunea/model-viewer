@@ -36,6 +36,7 @@ export interface HotspotConfiguration {
   position?: string;
   normal?: string;
   surface?: string;
+  modelIndex?: number|null;
 }
 
 const a = new Vector3();
@@ -52,12 +53,13 @@ const quat = new Quaternion();
 export class Hotspot extends CSS2DObject {
   public normal: Vector3 = new Vector3(0, 1, 0);
   public surface?: string;
+  public modelIndex?: number;
   public mesh?: Mesh;
   public tri?: Vector3;
   public bary?: Vector3;
   private initialized = false;
   private referenceCount = 1;
-  private pivotElement = document.createElement('div');
+  private pivotEl = document.createElement('div');
   private slot: HTMLSlotElement = document.createElement('slot');
 
   constructor(config: HotspotConfiguration) {
@@ -67,12 +69,16 @@ export class Hotspot extends CSS2DObject {
 
     this.slot.name = config.name;
 
-    this.element.appendChild(this.pivotElement);
-    this.pivotElement.appendChild(this.slot);
+    this.element.appendChild(this.pivotEl);
+    this.pivotEl.appendChild(this.slot);
 
     this.updatePosition(config.position);
     this.updateNormal(config.normal);
     this.surface = config.surface;
+
+    if (config.modelIndex != null) {
+      this.modelIndex = config.modelIndex;
+    }
   }
 
   get facingCamera(): boolean {
@@ -162,13 +168,13 @@ export class Hotspot extends CSS2DObject {
 
     triangle.set(a, b, c);
     triangle.getNormal(this.normal).transformDirection(mesh.matrixWorld);
-    const pivot = target.parent as ModelScene;
-    quat.setFromAxisAngle(a.set(0, 1, 0), -pivot.rotation.y);
+    const pivotEl = target.parent as ModelScene;
+    quat.setFromAxisAngle(a.set(0, 1, 0), -pivotEl.rotation.y);
     this.normal.applyQuaternion(quat);
   }
 
   orient(radians: number) {
-    this.pivotElement.style.transform = `rotate(${radians}rad)`;
+    this.pivotEl.style.transform = `rotate(${radians}rad)`;
   }
 
   updateVisibility(show: boolean) {

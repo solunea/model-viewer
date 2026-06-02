@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+import './features/extra-model.js';
+
 import {AnimationMixin} from './features/animation.js';
 import {AnnotationMixin} from './features/annotation.js';
 import {ARMixin} from './features/ar.js';
@@ -40,5 +42,6 @@ customElements.define('model-viewer', ModelViewerElement);
 declare global {
   interface HTMLElementTagNameMap {
     'model-viewer': ModelViewerElement;
+    'extra-model': import('./features/extra-model.js').ExtraModelElement;
   }
 }

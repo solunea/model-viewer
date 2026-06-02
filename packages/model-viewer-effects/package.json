@@ -73,7 +73,7 @@
   ],
   "dependencies": {
     "lit": "^3.2.1",
-    "postprocessing": "^6.38.3"
+    "postprocessing": "^6.38.2"
   },
   "peerDependencies": {
     "@solunea/model-viewer": "^4.2.0"

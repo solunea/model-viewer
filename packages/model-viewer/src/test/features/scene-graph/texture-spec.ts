@@ -26,6 +26,7 @@ import {waitForEvent} from '../../../utilities.js';
 import {assetPath} from '../../helpers.js';
 
 const ASTRONAUT_GLB_PATH = assetPath('models/Astronaut.glb');
+const KTX2_TEXTURE_PATH = assetPath('models/CesiumLogoFlat.ktx2');
 suite('scene-graph/texture', () => {
   suite('Texture', () => {
     let element: ModelViewerElement;
@@ -66,6 +67,44 @@ suite('scene-graph/texture', () => {
 
       expect(threeTexture.uuid).to.be.equal(newUUID);
     });
+
+    test('Create a KTX2 texture', async () => {
+      const ktx2Texture = await element.createTexture(KTX2_TEXTURE_PATH);
+      expect(ktx2Texture).to.not.be.null;
+      expect(ktx2Texture!.source[$threeTexture].userData.mimeType)
+          .to.be.equal('image/png');
+    });
+
+    test(
+        'exports and re-imports a model with KTX2 compressed texture',
+        async () => {
+          const ktx2Texture = await element.createTexture(KTX2_TEXTURE_PATH);
+          element.model!.materials[0]
+              .pbrMetallicRoughness.baseColorTexture!.setTexture(ktx2Texture);
+
+          const materialCount = element.model!.materials.length;
+          const dim = element.getDimensions();
+
+          const exported = await element.exportScene({binary: true});
+          expect(exported).to.be.not.undefined;
+          expect(exported.size).to.be.greaterThan(500);
+
+          // Verify scene is still intact after export (no renderer
+          // corruption).
+          expect(element.model).to.not.be.null;
+          expect(element.model!.materials.length).to.equal(materialCount);
+          const dimAfter = element.getDimensions();
+          expect(dimAfter.x).to.be.closeTo(dim.x, 0.001);
+          expect(dimAfter.y).to.be.closeTo(dim.y, 0.001);
+          expect(dimAfter.z).to.be.closeTo(dim.z, 0.001);
+
+          const url = URL.createObjectURL(exported);
+          element.src = url;
+          await waitForEvent(element, 'load');
+
+          expect(element.model).to.not.be.null;
+          expect(element.model!.materials.length).to.be.greaterThan(0);
+        });
 
     test('Verify legacy correlatedObjects are updated.', async () => {
       const newUUID: string|undefined = texture?.source[$threeTexture]?.uuid;

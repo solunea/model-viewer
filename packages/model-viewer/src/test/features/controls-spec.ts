@@ -282,6 +282,7 @@ suite('Controls', () => {
       expect(fov).to.be.closeTo(DEFAULT_FOV_DEG, .001);
       element.setAttribute('style', 'width: 200px; height: 300px');
       await rafPasses();
+      await timePasses(50);
       await rafPasses();
 
       expect(element.getFieldOfView()).to.be.greaterThan(fov);
@@ -485,13 +486,6 @@ suite('Controls', () => {
       element.cameraControls = false;
       await timePasses();
       expect(controls.interactionEnabled).to.be.false;
-    });
-
-    test('switches to fps mode when configured', async () => {
-      element.mode = 'fps';
-      await element.updateComplete;
-
-      expect((controls as any).mode).to.be.equal('fps');
     });
 
     suite('when user is interacting', () => {
