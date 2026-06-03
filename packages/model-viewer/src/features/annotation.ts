@@ -148,6 +148,7 @@ export const AnnotationMixin = <T extends Constructor<ModelViewerElementBase>>(
       if (config.modelIndex !== undefined && config.modelIndex !== null) {
         hotspot.modelIndex = config.modelIndex;
       }
+      this[$scene].updateHotspotAttachment(hotspot);
       this[$scene].updateSurfaceHotspot(hotspot);
       this[$needsRender]();
     }
