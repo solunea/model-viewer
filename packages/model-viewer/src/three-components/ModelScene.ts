@@ -356,14 +356,10 @@ export class ModelScene extends Scene {
     }
   }
 
-  private applyAutoSideOffset(index: number) {
-    const model = this._models[index];
-    if (!model)
-      return;
-
+  private getOccupiedBounds(excludeIndex: number): Box3|null {
     let occupied: Box3|null = null;
     for (let i = 0; i < this._models.length; i++) {
-      if (i === index)
+      if (i === excludeIndex)
         continue;
       const box = this.getModelBounds(i);
       if (!box)
@@ -375,6 +371,15 @@ export class ModelScene extends Scene {
       }
     }
 
+    return occupied;
+  }
+
+  private applyAutoSideOffset(index: number) {
+    const model = this._models[index];
+    if (!model)
+      return;
+
+    const occupied = this.getOccupiedBounds(index);
     const box = this.getModelBounds(index);
     if (!occupied || !box)
       return;
@@ -422,7 +427,9 @@ export class ModelScene extends Scene {
 
     model.updateMatrixWorld(true);
     if (autoOffset) {
-      this.alignModelFloor(index, offsetY);
+      const occupied = this.getOccupiedBounds(index);
+      const floorY = occupied ? occupied.min.y : 0;
+      this.alignModelFloor(index, floorY + offsetY);
       this.applyAutoSideOffset(index);
     }
 
