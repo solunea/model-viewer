@@ -1719,7 +1719,7 @@ export class ModelScene extends Scene {
   positional anchors.
    */
   updateHotspotAttachment(hotspot: Hotspot) {
-    const targetNode = (hotspot.modelIndex != null &&
+    const targetNode = (hotspot.modelIndex != null && hotspot.modelIndex > 0 &&
                         this._models[hotspot.modelIndex]) ?
         this._models[hotspot.modelIndex] :
         this.target;
