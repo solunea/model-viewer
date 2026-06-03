@@ -1700,8 +1700,6 @@ export class ModelScene extends Scene {
     const uvw = new Vector3();
     tri.getBarycoord(mesh.worldToLocal(hit.point), uvw);
 
-    tri.getBarycoord(mesh.worldToLocal(hit.point), uvw);
-
     const baseSurface = `${meshes} ${primitives} ${a} ${b} ${c} ${
         uvw.x.toFixed(3)} ${uvw.y.toFixed(3)} ${uvw.z.toFixed(3)}`;
 
