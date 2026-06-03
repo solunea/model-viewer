@@ -1655,7 +1655,8 @@ export class ModelScene extends Scene {
         raycaster.ray.direction.clone().multiplyScalar(-1);
     const uv = hit.uv ?? null;
     const modelIndex = this.getModelIndexFromHit(hit);
-    const targetModel = this.models[modelIndex] || this.target;
+    const targetModel =
+        modelIndex > 0 ? this.models[modelIndex] || this.target : this.target;
     const worldToModel = new Matrix4().copy(targetModel.matrixWorld).invert();
 
     return {position, normal, uv, modelIndex, worldToModel};
