@@ -234,11 +234,15 @@ export default class ModelViewerElementBase extends ReactiveElement {
     } else {
       // Apply Transforms
       if (this[$scene]) {
+        const extraElement = targetNode as HTMLElement;
         this[$scene].updateModelTransforms(
             modelIndex,
             customEv.detail.offset,
             customEv.detail.orientation,
-            customEv.detail.scale);
+            customEv.detail.scale,
+            extraElement.hasAttribute('data-auto-offset') ||
+                String(customEv.detail.offset || '').trim().toLowerCase() ===
+                    'auto');
       }
     }
   };
@@ -720,7 +724,12 @@ export default class ModelViewerElementBase extends ReactiveElement {
       extraModels.forEach((m, i) => {
         const modelIndex = this.src ? i + 1 : i;
         this[$scene].updateModelTransforms(
-            modelIndex, m.offset, m.orientation, m.scale);
+            modelIndex,
+            m.offset,
+            m.orientation,
+            m.scale,
+            m.hasAttribute('data-auto-offset') ||
+                String(m.offset || '').trim().toLowerCase() === 'auto');
       });
 
       this[$markLoaded]();

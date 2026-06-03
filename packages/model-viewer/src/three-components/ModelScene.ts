@@ -328,13 +328,75 @@ export class ModelScene extends Scene {
     this.setGroundedSkybox();
   }
 
-  updateModelTransforms(
-      index: number, offset?: string|null, _orientation?: string|null,
-      scale?: string|null) {
+  private getModelBounds(index: number): Box3|null {
+    const model = this._models[index];
+    if (!model)
+      return null;
+
+    const box = new Box3().setFromObject(model);
+    if (!isFinite(box.min.x) || !isFinite(box.min.y) ||
+        !isFinite(box.min.z) || !isFinite(box.max.x) ||
+        !isFinite(box.max.y) || !isFinite(box.max.z)) {
+      return null;
+    }
+
+    return box;
+  }
+
+  private alignModelFloor(index: number, targetY: number) {
+    const model = this._models[index];
+    const box = this.getModelBounds(index);
+    if (!model || !box)
+      return;
+
+    const deltaY = targetY - box.min.y;
+    if (isFinite(deltaY) && Math.abs(deltaY) > 0.000001) {
+      model.position.y += deltaY;
+      model.updateMatrixWorld(true);
+    }
+  }
+
+  private applyAutoSideOffset(index: number) {
     const model = this._models[index];
     if (!model)
       return;
 
+    let occupied: Box3|null = null;
+    for (let i = 0; i < this._models.length; i++) {
+      if (i === index)
+        continue;
+      const box = this.getModelBounds(i);
+      if (!box)
+        continue;
+      if (occupied == null) {
+        occupied = box.clone();
+      } else {
+        occupied.union(box);
+      }
+    }
+
+    const box = this.getModelBounds(index);
+    if (!occupied || !box)
+      return;
+
+    const occupiedSizeX = Math.max(0, occupied.max.x - occupied.min.x);
+    const modelSizeX = Math.max(0, box.max.x - box.min.x);
+    const gap = Math.max(0.1, occupiedSizeX * 0.04, modelSizeX * 0.04);
+    const deltaX = occupied.max.x + gap - box.min.x;
+    if (isFinite(deltaX)) {
+      model.position.x += deltaX;
+      model.updateMatrixWorld(true);
+    }
+  }
+
+  updateModelTransforms(
+      index: number, offset?: string|null, _orientation?: string|null,
+      scale?: string|null, autoOffset = false) {
+    const model = this._models[index];
+    if (!model)
+      return;
+
+    let offsetY = 0;
     if (offset) {
       const parts = offset.split(' ')
                         .map(s => s.trim())
@@ -342,6 +404,7 @@ export class ModelScene extends Scene {
                         .map(Number);
       if (parts.length === 3 && !parts.some(isNaN)) {
         model.position.set(parts[0], parts[1], parts[2]);
+        offsetY = parts[1];
       }
     }
 
@@ -358,6 +421,11 @@ export class ModelScene extends Scene {
     }
 
     model.updateMatrixWorld(true);
+    if (autoOffset) {
+      this.alignModelFloor(index, offsetY);
+      this.applyAutoSideOffset(index);
+    }
+
     // Defer bounding box and shadow recalculations.
     // If developers animate `<extra-model>` offset or scale properties via
     // requestAnimationFrame, recalculating bounding boxes synchronously every
