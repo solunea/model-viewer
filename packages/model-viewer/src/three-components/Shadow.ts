@@ -236,7 +236,7 @@ export class Shadow extends Object3D {
     this.depthMaterial.onBeforeCompile = function(shader) {
       if (shader && typeof shader.fragmentShader === 'string') {
         shader.fragmentShader = shader.fragmentShader.replace(
-            'gl_FragColor = vec4( vec3( 1.0 - fragCoordZ ), opacity );',
+            /gl_FragColor\s*=\s*vec4\(\s*vec3\(\s*1\.0\s*-\s*fragCoordZ\s*\),\s*opacity\s*\);/,
             'gl_FragColor = vec4( vec3( 0.0 ), ( 1.0 - fragCoordZ ) * opacity );');
       }
     };
@@ -603,7 +603,17 @@ export class Shadow extends Object3D {
 
     const oldRenderTarget = renderer.getRenderTarget();
     renderer.setRenderTarget(this.renderTarget);
+    const state = (renderer as any).state;
+    if (state != null) {
+      state.buffers.color.setMask(true);
+      state.buffers.depth.setMask(true);
+    }
+    renderer.clear();
+
+    const initialAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
     renderer.render(scene, this.basicCamera);
+    renderer.autoClear = initialAutoClear;
 
     scene.overrideMaterial = null;
     this.floor.visible = true;
