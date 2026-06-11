@@ -180,6 +180,16 @@ suite('TextureUtils', () => {
               .to.be.eq(EquirectangularReflectionMapping);
         });
 
+    test('returns a skybox depth texture from url', async () => {
+      const textures = await textureUtils.generateEnvironmentMapAndSkybox(
+          EQUI_URL, null, () => {}, false, EQUI_URL);
+
+      const skyboxDepth = textures.skyboxDepth!;
+
+      expect(skyboxDepth.isTexture).to.be.ok;
+      expect(skyboxDepth.name).to.be.eq(EQUI_URL);
+    });
+
     test('throws if given an invalid url', async () => {
       try {
         await textureUtils.generateEnvironmentMapAndSkybox();

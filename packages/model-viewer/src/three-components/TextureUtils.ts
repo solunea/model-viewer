@@ -14,7 +14,7 @@
  */
 
 import {GainMapDecoderMaterial, HDRJPGLoader, QuadRenderer} from '@monogrid/gainmap-js';
-import {BackSide, BoxGeometry, CubeCamera, CubeTexture, DataTexture, EquirectangularReflectionMapping, HalfFloatType, LinearSRGBColorSpace, Loader, Mesh, NoBlending, NoToneMapping, RGBAFormat, Scene, ShaderMaterial, SRGBColorSpace, Texture, TextureLoader, Vector3, WebGLCubeRenderTarget, WebGLRenderer} from 'three';
+import {BackSide, BoxGeometry, ClampToEdgeWrapping, CubeCamera, CubeTexture, DataTexture, EquirectangularReflectionMapping, HalfFloatType, LinearFilter, LinearSRGBColorSpace, Loader, Mesh, NoBlending, NoToneMapping, RGBAFormat, RepeatWrapping, Scene, ShaderMaterial, SRGBColorSpace, Texture, TextureLoader, Vector3, WebGLCubeRenderTarget, WebGLRenderer} from 'three';
 import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
 
 import {deserializeUrl, timePasses} from '../utilities.js';
@@ -25,6 +25,7 @@ import EnvironmentScene from './EnvironmentScene.js';
 export interface EnvironmentMapAndSkybox {
   environmentMap: Texture;
   skybox: Texture|null;
+  skyboxDepth: Texture|null;
 }
 
 const GENERATED_SIGMA = 0.04;
@@ -48,6 +49,7 @@ export default class TextureUtils {
   private generatedEnvironmentMapAlt: Promise<CubeTexture>|null = null;
 
   private skyboxCache = new Map<string, Promise<Texture>>();
+  private skyboxDepthCache = new Map<string, Promise<Texture>>();
 
   private blurMaterial: ShaderMaterial|null = null;
   private blurScene: Scene|null = null;
@@ -197,6 +199,33 @@ export default class TextureUtils {
     }
   }
 
+  private configureSkyboxDepthTexture(texture: Texture, name: string): Texture {
+    texture.name = name;
+    texture.flipY = false;
+    texture.wrapS = RepeatWrapping;
+    texture.wrapT = ClampToEdgeWrapping;
+    texture.minFilter = LinearFilter;
+    texture.magFilter = LinearFilter;
+    texture.needsUpdate = true;
+    this.threeRenderer.initTexture(texture);
+    return texture;
+  }
+
+  private async loadSkyboxDepthFromUrl(
+      url: string, withCredentials: boolean): Promise<Texture> {
+    if (TRANSIENT_URL_RE.test(url)) {
+      const texture = await this.loadImage(url, withCredentials);
+      return this.configureSkyboxDepthTexture(texture, url);
+    }
+
+    if (!this.skyboxDepthCache.has(url)) {
+      this.skyboxDepthCache.set(url, this.loadImage(url, withCredentials).then(
+          texture => this.configureSkyboxDepthTexture(texture, url)));
+    }
+
+    return this.skyboxDepthCache.get(url)!;
+  }
+
   /**
    * Returns a { skybox, environmentMap } object with the targets/textures
    * accordingly. `skybox` is a WebGLRenderCubeTarget, and `environmentMap`
@@ -205,20 +234,28 @@ export default class TextureUtils {
   async generateEnvironmentMapAndSkybox(
       skyboxUrl: string|null = null, environmentMapUrl: string|null = null,
       progressCallback: (progress: number) => void = () => {},
-      withCredentials = false): Promise<EnvironmentMapAndSkybox> {
+      withCredentials = false,
+      skyboxDepthUrl: string|null = null): Promise<EnvironmentMapAndSkybox> {
     const useAltEnvironment = environmentMapUrl !== 'legacy';
     if (environmentMapUrl === 'legacy' || environmentMapUrl === 'neutral') {
       environmentMapUrl = null;
     }
     environmentMapUrl = deserializeUrl(environmentMapUrl);
+    skyboxDepthUrl = deserializeUrl(skyboxDepthUrl);
 
     let skyboxLoads: Promise<Texture|null> = Promise.resolve(null);
+    let skyboxDepthLoads: Promise<Texture|null> = Promise.resolve(null);
     let environmentMapLoads: Promise<Texture>;
 
     // If we have a skybox URL, attempt to load it as a cubemap
     if (!!skyboxUrl) {
       skyboxLoads = this.loadEquirectFromUrl(
           skyboxUrl, withCredentials, progressCallback);
+    }
+
+    if (!!skyboxDepthUrl) {
+      skyboxDepthLoads =
+          this.loadSkyboxDepthFromUrl(skyboxDepthUrl, withCredentials);
     }
 
     if (!!environmentMapUrl) {
@@ -235,14 +272,14 @@ export default class TextureUtils {
           this.loadGeneratedEnvironmentMap();
     }
 
-    const [environmentMap, skybox] =
-        await Promise.all([environmentMapLoads, skyboxLoads]);
+    const [environmentMap, skybox, skyboxDepth] =
+        await Promise.all([environmentMapLoads, skyboxLoads, skyboxDepthLoads]);
 
     if (environmentMap == null) {
       throw new Error('Failed to load environment map.');
     }
 
-    return {environmentMap, skybox};
+    return {environmentMap, skybox, skyboxDepth};
   }
 
   /**
@@ -488,6 +525,10 @@ export default class TextureUtils {
     for (const [, promise] of this.skyboxCache) {
       const skybox = await promise;
       skybox.dispose();
+    }
+    for (const [, promise] of this.skyboxDepthCache) {
+      const skyboxDepth = await promise;
+      skyboxDepth.dispose();
     }
     if (this.generatedEnvironmentMap != null) {
       (await this.generatedEnvironmentMap).dispose();

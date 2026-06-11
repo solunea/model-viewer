@@ -16,7 +16,7 @@
 import '../renderer-gate.js';
 
 import {expect} from 'chai';
-import {Texture} from 'three';
+import {CanvasTexture, Texture} from 'three';
 
 import {BASE_OPACITY} from '../../features/environment.js';
 import ModelViewerElementBase, {$scene} from '../../model-viewer-base.js';
@@ -29,6 +29,32 @@ import {assetPath, rafPasses, until} from '../helpers.js';
 const ALT_BG_IMAGE_URL = assetPath('environments/white_furnace.hdr');
 const HDR_BG_IMAGE_URL = assetPath('environments/spruit_sunrise_1k_HDR.hdr');
 const MODEL_URL = assetPath('models/reflective-sphere.gltf');
+
+const createCanvasTexture = (values: Array<number>): CanvasTexture => {
+  const canvas = document.createElement('canvas');
+  canvas.width = values.length;
+  canvas.height = 1;
+  const context = canvas.getContext('2d')!;
+  values.forEach((value, index) => {
+    context.fillStyle = `rgb(${value}, ${value}, ${value})`;
+    context.fillRect(index, 0, 1, 1);
+  });
+  return new CanvasTexture(canvas);
+};
+
+const createSkyboxTexture = () => createCanvasTexture([128]);
+const createDepthTexture = (value: number) => createCanvasTexture([value]);
+
+const createRgbDepthTexture = (red: number, green: number, blue: number):
+    CanvasTexture => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  const context = canvas.getContext('2d')!;
+  context.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+  context.fillRect(0, 0, 1, 1);
+  return new CanvasTexture(canvas);
+};
 
 /**
  * Returns a promise that resolves when a given element is loaded
@@ -54,6 +80,24 @@ suite('Environment', () => {
   });
 
   teardown(() => element.parentNode && element.parentNode.removeChild(element));
+
+  test('exposes skybox depth of field attributes', () => {
+    element.setAttribute('skybox-depth-image', 'depth.png');
+    element.setAttribute('skybox-dof-focus-mode', 'auto');
+    element.setAttribute('skybox-dof-focus', '0.35');
+    element.setAttribute('skybox-dof-strength', '2');
+    element.setAttribute('skybox-dof-max-blur', '8');
+    element.setAttribute('skybox-dof-focus-smoothing', '80');
+    element.setAttribute('skybox-depth-invert', '');
+
+    expect(element.skyboxDepthImage).to.be.eq('depth.png');
+    expect(element.skyboxDofFocusMode).to.be.eq('auto');
+    expect(element.skyboxDofFocus).to.be.eq(0.35);
+    expect(element.skyboxDofStrength).to.be.eq(2);
+    expect(element.skyboxDofMaxBlur).to.be.eq(8);
+    expect(element.skyboxDofFocusSmoothing).to.be.eq(80);
+    expect(element.skyboxDepthInvert).to.be.true;
+  });
 
   test('only generates an environment when in the render tree', async () => {
     let environmentChangeCount = 0;
@@ -301,6 +345,110 @@ suite('Environment', () => {
       test('reapplies generated environment map on model', async function() {
         expect(scene.environment!.name).to.be.eq('neutral');
       });
+    });
+  });
+
+  suite('skybox depth of field', () => {
+    let skybox: Texture;
+    let depth: Texture;
+
+    teardown(() => {
+      skybox?.dispose();
+      depth?.dispose();
+    });
+
+    test('uses manual focus when a skybox depth texture is provided', () => {
+      skybox = createSkyboxTexture();
+      depth = createDepthTexture(255);
+      scene.setSkyboxDofOptions({
+        focusMode: 'manual',
+        focus: 0.25,
+        strength: 2,
+        maxBlur: 8,
+        focusSmoothing: 0,
+        depthInvert: false
+      });
+      scene.setEnvironmentAndSkybox(null, skybox, depth);
+
+      expect(scene.background).to.be.null;
+      expect(scene.getSkyboxDofFocus()).to.be.eq(0.25);
+    });
+
+    test('removes skybox depth of field when depth texture is removed', () => {
+      skybox = createSkyboxTexture();
+      depth = createDepthTexture(255);
+      scene.setEnvironmentAndSkybox(null, skybox, depth);
+      scene.setEnvironmentAndSkybox(null, skybox, null);
+
+      expect(scene.background).to.be.eq(skybox);
+    });
+
+    test('samples auto focus from the skybox depth texture', () => {
+      skybox = createSkyboxTexture();
+      depth = createDepthTexture(64);
+      scene.setSkyboxDofOptions({
+        focusMode: 'auto',
+        focus: 1,
+        strength: 1,
+        maxBlur: 12,
+        focusSmoothing: 0,
+        depthInvert: false
+      });
+      scene.setEnvironmentAndSkybox(null, skybox, depth);
+      scene.updateSkyboxDof(16);
+
+      expect(scene.getSkyboxDofFocus()).to.be.closeTo(64 / 255, 0.001);
+    });
+
+    test('inverts sampled auto focus when requested', () => {
+      skybox = createSkyboxTexture();
+      depth = createDepthTexture(64);
+      scene.setSkyboxDofOptions({
+        focusMode: 'auto',
+        focus: 1,
+        strength: 1,
+        maxBlur: 12,
+        focusSmoothing: 0,
+        depthInvert: true
+      });
+      scene.setEnvironmentAndSkybox(null, skybox, depth);
+      scene.updateSkyboxDof(16);
+
+      expect(scene.getSkyboxDofFocus()).to.be.closeTo(1 - 64 / 255, 0.001);
+    });
+
+    test('samples auto focus from a colored depth heatmap', () => {
+      skybox = createSkyboxTexture();
+      depth = createRgbDepthTexture(255, 32, 0);
+      scene.setSkyboxDofOptions({
+        focusMode: 'auto',
+        focus: 0,
+        strength: 1,
+        maxBlur: 12,
+        focusSmoothing: 0,
+        depthInvert: false
+      });
+      scene.setEnvironmentAndSkybox(null, skybox, depth);
+      scene.updateSkyboxDof(16);
+
+      expect(scene.getSkyboxDofFocus()).to.be.greaterThan(0.9);
+    });
+
+    test('treats violet colored depth heatmap pixels as far', () => {
+      skybox = createSkyboxTexture();
+      depth = createRgbDepthTexture(48, 28, 92);
+      scene.setSkyboxDofOptions({
+        focusMode: 'auto',
+        focus: 1,
+        strength: 1,
+        maxBlur: 12,
+        focusSmoothing: 0,
+        depthInvert: false
+      });
+      scene.setEnvironmentAndSkybox(null, skybox, depth);
+      scene.updateSkyboxDof(16);
+
+      expect(scene.getSkyboxDofFocus()).to.be.lessThan(0.1);
     });
   });
 });

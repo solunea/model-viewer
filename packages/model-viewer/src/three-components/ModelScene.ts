@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import {AnimationAction, AnimationActionLoopStyles, AnimationClip, AnimationMixer, AnimationMixerEventMap, Box3, Camera, Euler, Event as ThreeEvent, Intersection, LoopOnce, LoopPingPong, LoopRepeat, Material, Matrix3, Matrix4, Mesh, MeshBasicMaterial, NeutralToneMapping, Object3D, PerspectiveCamera, Raycaster, Scene, Sphere, SphereGeometry, Texture, ToneMapping, Triangle, Vector2, Vector3, WebGLRenderer, XRTargetRaySpace} from 'three';
+import {AnimationAction, AnimationActionLoopStyles, AnimationClip, AnimationMixer, AnimationMixerEventMap, Box3, Camera, Euler, Event as ThreeEvent, Intersection, LoopOnce, LoopPingPong, LoopRepeat, Material, Matrix3, Matrix4, Mesh, MeshBasicMaterial, NeutralToneMapping, Object3D, PerspectiveCamera, Raycaster, Scene, ShaderMaterial, Sphere, SphereGeometry, Texture, ToneMapping, Triangle, Vector2, Vector3, WebGLRenderer, XRTargetRaySpace} from 'three';
 import {CSS2DRenderer} from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {reduceVertices} from 'three/examples/jsm/utils/SceneUtils.js';
 
@@ -62,6 +62,23 @@ const normalWorld = new Vector3();
 const raycaster = new Raycaster();
 const vector3 = new Vector3();
 const ndc = new Vector2();
+const skyboxDofDirection = new Vector3();
+const COLORED_DEPTH_FAR_HUE = 0.72;
+
+export interface SkyboxDofOptions {
+  focusMode: string;
+  focus: number;
+  strength: number;
+  maxBlur: number;
+  focusSmoothing: number;
+  depthInvert: boolean;
+}
+
+interface SkyboxDofSampleCache {
+  image: CanvasImageSource;
+  canvas: HTMLCanvasElement;
+  context: CanvasRenderingContext2D;
+}
 
 /**
  * A THREE.Scene object that takes a Model and CanvasHTMLElement and
@@ -120,6 +137,17 @@ export class ModelScene extends Scene {
   private skyboxTransitionPending: Texture|null = null;
   private skyboxTransitionDamper = new Damper();
   private skyboxTransition: Mesh<SphereGeometry, MeshBasicMaterial>|null = null;
+  private skyboxDofMesh: Mesh<SphereGeometry, ShaderMaterial>|null = null;
+  private skyboxDofSkybox: Texture|null = null;
+  private skyboxDofDepth: Texture|null = null;
+  private skyboxDofSampleCache: SkyboxDofSampleCache|null = null;
+  private skyboxDofFocusMode = 'manual';
+  private skyboxDofManualFocus = 1;
+  private skyboxDofCurrentFocus = 1;
+  private skyboxDofStrength = 1;
+  private skyboxDofMaxBlur = 12;
+  private skyboxDofFocusSmoothing = 140;
+  private skyboxDofDepthInvert = false;
 
   private _currentGLTFs: ModelViewerGLTFInstance[] = [];
   private _models: Object3D[] = [];
@@ -462,6 +490,7 @@ export class ModelScene extends Scene {
     this.renderCount = 0;
     this.queueRender();
     this.clearSkyboxTransition();
+    this.clearSkyboxDof();
     if (this.shadow != null) {
       this.shadow.setIntensity(0);
     }
@@ -507,6 +536,7 @@ export class ModelScene extends Scene {
       this.shadow.dispose();
       this.shadow = null;
     }
+    this.disposeSkyboxDof();
     (this.element as any)[$currentGLTF] = null;
     (this.element as any)[$originalGltfJson] = null;
     (this.element as any)[$model] = null;
@@ -759,26 +789,35 @@ export class ModelScene extends Scene {
     return {width: this.width, height: this.height};
   }
 
-  setEnvironmentAndSkybox(environment: Texture|null, skybox: Texture|null) {
+  setEnvironmentAndSkybox(
+      environment: Texture|null, skybox: Texture|null,
+      skyboxDepth: Texture|null = null) {
     if (this.element[$renderer].arRenderer.presentedScene === this) {
       return;
     }
     const previousEnvironment = this.environment;
     const previousSkybox = this.currentSkybox();
+    const previousSkyboxDepth = this.currentSkyboxDepth();
+    const useSkyboxDof = this.canUseSkyboxDof(skybox, skyboxDepth);
     const shouldTransitionSkybox =
-        this.shouldTransitionSkybox(previousSkybox, skybox);
+        !useSkyboxDof && this.shouldTransitionSkybox(previousSkybox, skybox);
     this.environment = environment;
-    if (shouldTransitionSkybox) {
+    if (useSkyboxDof) {
+      this.clearSkyboxTransition();
+      this.setSkyboxDof(skybox, skyboxDepth);
+    } else if (shouldTransitionSkybox) {
+      this.clearSkyboxDof();
       this.startSkyboxTransition(previousSkybox, skybox);
     } else {
+      this.clearSkyboxDof();
       this.clearSkyboxTransition();
       this.setBackground(skybox);
     }
     this.disposeReplacedTransientTextures(
-        [previousEnvironment, previousSkybox],
+        [previousEnvironment, previousSkybox, previousSkyboxDepth],
         shouldTransitionSkybox ?
             [environment, skybox, previousSkybox] :
-            [environment, skybox]);
+            [environment, skybox, skyboxDepth]);
     this.queueRender();
   }
 
@@ -802,12 +841,20 @@ export class ModelScene extends Scene {
   }
 
   private currentSkybox(): Texture|null {
+    if (this.skyboxDofMesh?.parent != null) {
+      return this.skyboxDofSkybox;
+    }
     return this.groundedSkybox.parent != null ?
         this.groundedSkybox.map :
         this.background as Texture | null;
   }
 
+  private currentSkyboxDepth(): Texture|null {
+    return this.skyboxDofMesh?.parent != null ? this.skyboxDofDepth : null;
+  }
+
   setBackground(skybox: Texture|null) {
+    this.clearSkyboxDof();
     this.groundedSkybox.map = skybox;
     if (this.groundedSkybox.isUsable()) {
       this.target.add(this.groundedSkybox);
@@ -816,6 +863,354 @@ export class ModelScene extends Scene {
       this.target.remove(this.groundedSkybox);
       this.background = skybox;
     }
+  }
+
+  private canUseSkyboxDof(skybox: Texture|null, skyboxDepth: Texture|null) {
+    return skybox != null && skyboxDepth != null &&
+        !this.groundedSkybox.isUsable();
+  }
+
+  private createSkyboxDofMaterial(): ShaderMaterial {
+    return new ShaderMaterial({
+      depthWrite: false,
+      depthTest: false,
+      uniforms: {
+        skybox: {value: null},
+        depthMap: {value: null},
+        focus: {value: 1},
+        strength: {value: 1},
+        maxBlur: {value: 12},
+        depthInvert: {value: 0},
+        mapSize: {value: new Vector2(1, 1)}
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix *
+              vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D skybox;
+        uniform sampler2D depthMap;
+        uniform float focus;
+        uniform float strength;
+        uniform float maxBlur;
+        uniform float depthInvert;
+        uniform vec2 mapSize;
+        varying vec2 vUv;
+
+        float rgbToHue(vec3 color) {
+          float maxChannel = max(max(color.r, color.g), color.b);
+          float minChannel = min(min(color.r, color.g), color.b);
+          float delta = maxChannel - minChannel;
+          if (delta < 0.0001) {
+            return 0.0;
+          }
+
+          float hue;
+          if (maxChannel == color.r) {
+            hue = mod((color.g - color.b) / delta, 6.0);
+          } else if (maxChannel == color.g) {
+            hue = (color.b - color.r) / delta + 2.0;
+          } else {
+            hue = (color.r - color.g) / delta + 4.0;
+          }
+
+          return hue / 6.0;
+        }
+
+        float decodeDepthColor(vec3 color) {
+          float maxChannel = max(max(color.r, color.g), color.b);
+          float minChannel = min(min(color.r, color.g), color.b);
+          if (maxChannel - minChannel < 0.05) {
+            return color.r;
+          }
+
+          float hue = rgbToHue(color);
+          if (hue > 0.92) {
+            return 1.0;
+          }
+
+          return clamp((${COLORED_DEPTH_FAR_HUE.toFixed(2)} - hue) /
+              ${COLORED_DEPTH_FAR_HUE.toFixed(2)}, 0.0, 1.0);
+        }
+
+        float readDepth(vec2 uv) {
+          float depth = decodeDepthColor(texture2D(depthMap, uv).rgb);
+          return mix(depth, 1.0 - depth, depthInvert);
+        }
+
+        vec4 readSkybox(vec2 uv) {
+          return texture2D(skybox, vec2(fract(uv.x), clamp(uv.y, 0.0, 1.0)));
+        }
+
+        void main() {
+          float depth = readDepth(vUv);
+          float blurPixels = clamp(abs(depth - focus) * strength * maxBlur,
+              0.0, maxBlur);
+          vec2 texel = 1.0 / max(mapSize, vec2(1.0));
+          vec2 radius = texel * blurPixels;
+
+          vec4 color = readSkybox(vUv);
+          vec4 blurred = color * 0.18;
+          blurred += readSkybox(vUv + radius * vec2( 1.0,  0.0)) * 0.09;
+          blurred += readSkybox(vUv + radius * vec2(-1.0,  0.0)) * 0.09;
+          blurred += readSkybox(vUv + radius * vec2( 0.0,  1.0)) * 0.09;
+          blurred += readSkybox(vUv + radius * vec2( 0.0, -1.0)) * 0.09;
+          blurred += readSkybox(vUv + radius * vec2( 0.7,  0.7)) * 0.08;
+          blurred += readSkybox(vUv + radius * vec2(-0.7,  0.7)) * 0.08;
+          blurred += readSkybox(vUv + radius * vec2( 0.7, -0.7)) * 0.08;
+          blurred += readSkybox(vUv + radius * vec2(-0.7, -0.7)) * 0.08;
+          blurred += readSkybox(vUv + radius * vec2( 1.6,  0.3)) * 0.06;
+          blurred += readSkybox(vUv + radius * vec2(-1.6, -0.3)) * 0.06;
+          blurred += readSkybox(vUv + radius * vec2( 0.3, -1.6)) * 0.06;
+          blurred += readSkybox(vUv + radius * vec2(-0.3,  1.6)) * 0.06;
+
+          float blurMix = smoothstep(0.25, max(0.5, maxBlur), blurPixels);
+          gl_FragColor = mix(color, blurred, blurMix);
+        }
+      `
+    });
+  }
+
+  private getTextureDimensions(texture: Texture|null): Vector2 {
+    const image = texture?.image as
+        | {width?: number, height?: number, naturalWidth?: number,
+           naturalHeight?: number}
+        | undefined;
+    return new Vector2(
+        image?.naturalWidth || image?.width || 1,
+        image?.naturalHeight || image?.height || 1);
+  }
+
+  private setSkyboxDof(skybox: Texture|null, skyboxDepth: Texture|null) {
+    if (!this.canUseSkyboxDof(skybox, skyboxDepth)) {
+      this.clearSkyboxDof();
+      return;
+    }
+
+    this.target.remove(this.groundedSkybox);
+    this.background = null;
+    this.skyboxDofSkybox = skybox;
+    this.skyboxDofDepth = skyboxDepth;
+    this.skyboxDofSampleCache = null;
+
+    if (this.skyboxDofMesh == null) {
+      const geometry = new SphereGeometry(1, 64, 32);
+      geometry.scale(1, 1, -1);
+      const material = this.createSkyboxDofMaterial();
+      this.skyboxDofMesh = new Mesh(geometry, material);
+      this.skyboxDofMesh.name = 'SkyboxDepthOfField';
+      this.skyboxDofMesh.userData.noHit = true;
+      this.skyboxDofMesh.renderOrder = -1000;
+    }
+
+    const material = this.skyboxDofMesh.material;
+    material.uniforms.skybox.value = skybox;
+    material.uniforms.depthMap.value = skyboxDepth;
+    material.uniforms.mapSize.value.copy(this.getTextureDimensions(skybox));
+    this.updateSkyboxDofUniforms();
+    this.updateSkyboxDofTransform();
+    this.add(this.skyboxDofMesh);
+  }
+
+  private clearSkyboxDof() {
+    if (this.skyboxDofMesh != null) {
+      this.skyboxDofMesh.removeFromParent();
+    }
+    this.skyboxDofSkybox = null;
+    this.skyboxDofDepth = null;
+    this.skyboxDofSampleCache = null;
+  }
+
+  private disposeSkyboxDof() {
+    if (this.skyboxDofMesh != null) {
+      this.clearSkyboxDof();
+      this.skyboxDofMesh.geometry.dispose();
+      this.skyboxDofMesh.material.dispose();
+      this.skyboxDofMesh = null;
+    }
+  }
+
+  setSkyboxDofOptions(options: SkyboxDofOptions) {
+    const focusMode = String(options.focusMode || '').toLowerCase();
+    this.skyboxDofFocusMode = focusMode === 'auto' ? 'auto' : 'manual';
+    this.skyboxDofManualFocus = Math.min(
+        1, Math.max(0, Number.isFinite(options.focus) ? options.focus : 1));
+    this.skyboxDofStrength = Math.max(
+        0, Number.isFinite(options.strength) ? options.strength : 1);
+    this.skyboxDofMaxBlur = Math.max(
+        0, Number.isFinite(options.maxBlur) ? options.maxBlur : 12);
+    this.skyboxDofFocusSmoothing = Math.max(
+        0,
+        Number.isFinite(options.focusSmoothing) ? options.focusSmoothing : 140);
+    this.skyboxDofDepthInvert = !!options.depthInvert;
+    if (this.skyboxDofFocusMode === 'manual') {
+      this.skyboxDofCurrentFocus = this.skyboxDofManualFocus;
+    }
+    this.updateSkyboxDofUniforms();
+    this.queueRender();
+  }
+
+  private updateSkyboxDofUniforms() {
+    const material = this.skyboxDofMesh?.material;
+    if (material == null) {
+      return;
+    }
+    material.uniforms.focus.value = this.skyboxDofCurrentFocus;
+    material.uniforms.strength.value = this.skyboxDofStrength;
+    material.uniforms.maxBlur.value = this.skyboxDofMaxBlur;
+    material.uniforms.depthInvert.value = this.skyboxDofDepthInvert ? 1 : 0;
+  }
+
+  private updateSkyboxDofTransform() {
+    const mesh = this.skyboxDofMesh;
+    if (mesh == null) {
+      return;
+    }
+    const camera = this.getCamera() as PerspectiveCamera;
+    mesh.position.copy(camera.position);
+    mesh.scale.setScalar(Math.max(camera.far * 0.5, 1));
+  }
+
+  private getSkyboxDofDepthCanvas(): SkyboxDofSampleCache|null {
+    const image = this.skyboxDofDepth?.image as CanvasImageSource | undefined;
+    if (image == null) {
+      return null;
+    }
+    if (this.skyboxDofSampleCache?.image === image) {
+      return this.skyboxDofSampleCache;
+    }
+    const width = (image as HTMLImageElement).naturalWidth ||
+        (image as HTMLCanvasElement).width || 0;
+    const height = (image as HTMLImageElement).naturalHeight ||
+        (image as HTMLCanvasElement).height || 0;
+    if (width <= 0 || height <= 0) {
+      return null;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (context == null) {
+      return null;
+    }
+    try {
+      context.drawImage(image, 0, 0, width, height);
+    } catch (e) {
+      return null;
+    }
+    this.skyboxDofSampleCache = {image, canvas, context};
+    return this.skyboxDofSampleCache;
+  }
+
+  private getSkyboxDofCenterUv(): Vector2 {
+    const camera = this.getCamera();
+    camera.getWorldDirection(skyboxDofDirection).normalize();
+    const u = 0.5 +
+        Math.atan2(skyboxDofDirection.z, skyboxDofDirection.x) /
+            (Math.PI * 2);
+    const v = 0.5 - Math.asin(Math.max(-1, Math.min(1, skyboxDofDirection.y))) /
+        Math.PI;
+    return ndc.set(u - Math.floor(u), Math.max(0, Math.min(1, v)));
+  }
+
+  private rgbToHue(red: number, green: number, blue: number): number {
+    const max = Math.max(red, green, blue);
+    const min = Math.min(red, green, blue);
+    const delta = max - min;
+    if (delta === 0) {
+      return 0;
+    }
+
+    let hue;
+    if (max === red) {
+      hue = ((green - blue) / delta) % 6;
+    } else if (max === green) {
+      hue = (blue - red) / delta + 2;
+    } else {
+      hue = (red - green) / delta + 4;
+    }
+
+    return (hue < 0 ? hue + 6 : hue) / 6;
+  }
+
+  private decodeSkyboxDofDepthPixel(data: Uint8ClampedArray): number {
+    const red = data[0] / 255;
+    const green = data[1] / 255;
+    const blue = data[2] / 255;
+    const max = Math.max(red, green, blue);
+    const min = Math.min(red, green, blue);
+    if (max - min < 0.05) {
+      return red;
+    }
+
+    const hue = this.rgbToHue(red, green, blue);
+    if (hue > 0.92) {
+      return 1;
+    }
+
+    return Math.max(
+        0, Math.min(1, (COLORED_DEPTH_FAR_HUE - hue) /
+                COLORED_DEPTH_FAR_HUE));
+  }
+
+  getSkyboxDofFocus(): number {
+    return this.skyboxDofCurrentFocus;
+  }
+
+  getSkyboxDofAutoFocusTarget(): number|null {
+    const cache = this.getSkyboxDofDepthCanvas();
+    if (cache == null) {
+      return null;
+    }
+    const uv = this.getSkyboxDofCenterUv();
+    const x = Math.min(
+        cache.canvas.width - 1, Math.max(0, Math.floor(uv.x * cache.canvas.width)));
+    const y = Math.min(
+        cache.canvas.height - 1, Math.max(0, Math.floor(uv.y * cache.canvas.height)));
+    try {
+      const data = cache.context.getImageData(x, y, 1, 1).data;
+      const depth = this.decodeSkyboxDofDepthPixel(data);
+      return this.skyboxDofDepthInvert ? 1 - depth : depth;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  updateSkyboxDof(deltaMilliseconds: number): boolean {
+    if (this.skyboxDofMesh?.parent == null) {
+      return false;
+    }
+
+    this.updateSkyboxDofTransform();
+    const previousFocus = this.skyboxDofCurrentFocus;
+    if (this.skyboxDofFocusMode === 'auto') {
+      const targetFocus = this.getSkyboxDofAutoFocusTarget();
+      if (targetFocus != null) {
+        if (this.skyboxDofFocusSmoothing <= 0) {
+          this.skyboxDofCurrentFocus = targetFocus;
+        } else {
+          const alpha =
+              1 - Math.exp(-deltaMilliseconds / this.skyboxDofFocusSmoothing);
+          this.skyboxDofCurrentFocus +=
+              (targetFocus - this.skyboxDofCurrentFocus) *
+              Math.max(0, Math.min(1, alpha));
+        }
+      }
+    } else {
+      this.skyboxDofCurrentFocus = this.skyboxDofManualFocus;
+    }
+
+    this.updateSkyboxDofUniforms();
+    const stillSettling =
+        Math.abs(previousFocus - this.skyboxDofCurrentFocus) > 0.0001;
+    if (stillSettling) {
+      this.queueRender();
+    }
+    return stillSettling;
   }
 
   setSkyboxInterpolationDecay(decayMilliseconds: number) {

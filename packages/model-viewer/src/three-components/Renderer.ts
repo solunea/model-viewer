@@ -460,6 +460,7 @@ export class Renderer extends
       }
 
       this.preRender(scene, t, delta);
+      scene.updateSkyboxDof(delta);
 
       if (!this.shouldRender(scene)) {
         continue;
