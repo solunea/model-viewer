@@ -634,15 +634,20 @@ export class ModelScene extends Scene {
     if (models.length === 0) {
       return;
     }
-    const orientation = parseExpressions(this.element.orientation)[0]
-                            .terms as [NumberNode, NumberNode, NumberNode];
+    const orientationExpression =
+        parseExpressions(this.element.orientation)[0] ||
+        parseExpressions('0deg 0deg 0deg')[0];
+    const orientation =
+        orientationExpression.terms as [NumberNode, NumberNode, NumberNode];
 
     const roll = normalizeUnit(orientation[0]).number;
     const pitch = normalizeUnit(orientation[1]).number;
     const yaw = normalizeUnit(orientation[2]).number;
 
-    const scale = parseExpressions(this.element.scale)[0]
-                      .terms as [NumberNode, NumberNode, NumberNode];
+    const scaleExpression =
+        parseExpressions(this.element.scale)[0] || parseExpressions('1 1 1')[0];
+    const scale =
+        scaleExpression.terms as [NumberNode, NumberNode, NumberNode];
 
     for (const mod of models) {
       mod.quaternion.setFromEuler(new Euler(pitch, yaw, roll, 'YXZ'));
