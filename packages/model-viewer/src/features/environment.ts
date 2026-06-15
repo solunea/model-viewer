@@ -53,6 +53,9 @@ export declare interface EnvironmentInterface {
   skyboxInterpolationDecay: number;
   exposure: number;
   hasBakedShadow(): boolean;
+  preloadSkybox(
+      skyboxImage?: string|null, environmentImage?: string|null,
+      skyboxDepthImage?: string|null): Promise<void>;
 }
 
 export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
@@ -201,6 +204,20 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     hasBakedShadow(): boolean {
       return this[$scene].bakedShadows.size > 0;
+    }
+
+    async preloadSkybox(
+        skyboxImage: string|null = this.skyboxImage,
+        environmentImage: string|null = this.environmentImage,
+        skyboxDepthImage: string|null = this.skyboxDepthImage): Promise<void> {
+      const {textureUtils} = this[$renderer];
+      if (textureUtils == null) {
+        return;
+      }
+
+      await textureUtils.generateEnvironmentMapAndSkybox(
+          deserializeUrl(skyboxImage), environmentImage, () => {},
+          this.withCredentials, skyboxDepthImage);
     }
 
     async[$updateEnvironment]() {
