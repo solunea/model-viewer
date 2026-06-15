@@ -581,7 +581,13 @@ export class ARRenderer extends EventDispatcher<
   }
 
   onUpdateScene = () => {
-    if (this.placementBox != null && this.isPresenting) {
+    const scene = this.presentedScene;
+
+    if (scene == null || !this.isPresenting) {
+      return;
+    }
+
+    if (this.placementBox != null) {
       // Update the existing placement box with new model dimensions instead of
       // recreating
       this.placementBox!.updateFromModelChanges();
@@ -596,9 +602,8 @@ export class ARRenderer extends EventDispatcher<
         this.menuPanel = null;
       }
       this.menuPanel = new XRMenuPanel();
-      this.presentedScene!.add(this.menuPanel);
-      this.menuPanel.updatePosition(
-          this.presentedScene!.getCamera(), this.placementBox!);
+      scene.add(this.menuPanel);
+      this.menuPanel.updatePosition(scene.getCamera(), this.placementBox!);
     }
   };
 
