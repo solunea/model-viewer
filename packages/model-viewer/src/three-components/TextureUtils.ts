@@ -294,7 +294,7 @@ export default class TextureUtils {
       progressCallback: (progress: number) => void,
       cacheKey: string|null = null): Promise<Texture> {
     const resolvedCacheKey = cacheKey != null && cacheKey !== '' ?
-        SKYBOX_CACHE_KEY_PREFIX + cacheKey :
+        SKYBOX_CACHE_KEY_PREFIX + cacheKey + ':' + url :
         url;
 
     if (TRANSIENT_URL_RE.test(url) && resolvedCacheKey === url) {
