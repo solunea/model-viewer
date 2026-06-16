@@ -36,6 +36,9 @@ const MAX_SAMPLES = 20;
 const HDR_FILE_RE = /\.hdr(\.js)?$/;
 const KTX2_FILE_RE = /\.ktx2(\?|#|$)/;
 const TRANSIENT_URL_RE = /^(blob:|data:)/i;
+const SKYBOX_CACHE_KEY_PREFIX = 'skybox:';
+
+export const SKYBOX_CACHE_KEY = 'modelViewerSkyboxCacheKey';
 
 export default class TextureUtils {
   public lottieLoaderUrl = '';
@@ -235,7 +238,8 @@ export default class TextureUtils {
       skyboxUrl: string|null = null, environmentMapUrl: string|null = null,
       progressCallback: (progress: number) => void = () => {},
       withCredentials = false,
-      skyboxDepthUrl: string|null = null): Promise<EnvironmentMapAndSkybox> {
+      skyboxDepthUrl: string|null = null,
+      skyboxCacheKey: string|null = null): Promise<EnvironmentMapAndSkybox> {
     const useAltEnvironment = environmentMapUrl !== 'legacy';
     if (environmentMapUrl === 'legacy' || environmentMapUrl === 'neutral') {
       environmentMapUrl = null;
@@ -250,7 +254,7 @@ export default class TextureUtils {
     // If we have a skybox URL, attempt to load it as a cubemap
     if (!!skyboxUrl) {
       skyboxLoads = this.loadEquirectFromUrl(
-          skyboxUrl, withCredentials, progressCallback);
+          skyboxUrl, withCredentials, progressCallback, skyboxCacheKey);
     }
 
     if (!!skyboxDepthUrl) {
@@ -287,19 +291,27 @@ export default class TextureUtils {
    */
   private async loadEquirectFromUrl(
       url: string, withCredentials: boolean,
-      progressCallback: (progress: number) => void): Promise<Texture> {
-    if (TRANSIENT_URL_RE.test(url)) {
+      progressCallback: (progress: number) => void,
+      cacheKey: string|null = null): Promise<Texture> {
+    const resolvedCacheKey = cacheKey != null && cacheKey !== '' ?
+        SKYBOX_CACHE_KEY_PREFIX + cacheKey :
+        url;
+
+    if (TRANSIENT_URL_RE.test(url) && resolvedCacheKey === url) {
       return this.loadEquirect(url, withCredentials, progressCallback);
     }
 
-    if (!this.skyboxCache.has(url)) {
-      const skyboxMapLoads =
-          this.loadEquirect(url, withCredentials, progressCallback);
+    if (!this.skyboxCache.has(resolvedCacheKey)) {
+      const skyboxMapLoads = this.loadEquirect(
+          url, withCredentials, progressCallback).then(texture => {
+        texture.userData[SKYBOX_CACHE_KEY] = resolvedCacheKey;
+        return texture;
+      });
 
-      this.skyboxCache.set(url, skyboxMapLoads);
+      this.skyboxCache.set(resolvedCacheKey, skyboxMapLoads);
     }
 
-    return this.skyboxCache.get(url)!;
+    return this.skyboxCache.get(resolvedCacheKey)!;
   }
 
   private async GenerateEnvironmentMap(scene: Scene, name: string) {

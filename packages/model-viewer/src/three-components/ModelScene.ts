@@ -29,6 +29,7 @@ import {ModelViewerGLTFInstance} from './gltf-instance/ModelViewerGLTFInstance.j
 import {GroundedSkybox} from './GroundedSkybox.js';
 import {Hotspot} from './Hotspot.js';
 import {Shadow} from './Shadow.js';
+import {SKYBOX_CACHE_KEY} from './TextureUtils.js';
 
 export const GROUNDED_SKYBOX_SIZE = 10;
 const MIN_SHADOW_RATIO = 100;
@@ -838,7 +839,8 @@ export class ModelScene extends Scene {
       }
 
       const name = texture.name || '';
-      if (/^(blob:|data:)/i.test(name)) {
+      if (/^(blob:|data:)/i.test(name) &&
+          texture.userData[SKYBOX_CACHE_KEY] == null) {
         texture.dispose();
         disposed.add(texture);
       }

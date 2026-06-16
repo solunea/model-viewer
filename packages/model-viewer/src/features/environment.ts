@@ -206,6 +206,15 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
       return this[$scene].bakedShadows.size > 0;
     }
 
+    private getSkyboxCacheKey(skyboxImage: string|null): string|null {
+      if (skyboxImage == null || !/^(blob:|data:)/i.test(skyboxImage)) {
+        return null;
+      }
+
+      return this.getAttribute('data-skybox-cache-key') ||
+          this.getAttribute('data-skybox-src');
+    }
+
     async preloadSkybox(
         skyboxImage: string|null = this.skyboxImage,
         environmentImage: string|null = this.environmentImage,
@@ -217,7 +226,8 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
       await textureUtils.generateEnvironmentMapAndSkybox(
           deserializeUrl(skyboxImage), environmentImage, () => {},
-          this.withCredentials, skyboxDepthImage);
+          this.withCredentials, skyboxDepthImage,
+          this.getSkyboxCacheKey(skyboxImage));
     }
 
     async[$updateEnvironment]() {
@@ -244,7 +254,8 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
                 environmentImage,
                 (progress: number) => updateEnvProgress(clamp(progress, 0, 1)),
                 this.withCredentials,
-                skyboxDepthImage);
+                skyboxDepthImage,
+                this.getSkyboxCacheKey(skyboxImage));
 
         if (this[$currentEnvironmentMap] !== environmentMap) {
           this[$currentEnvironmentMap] = environmentMap;
