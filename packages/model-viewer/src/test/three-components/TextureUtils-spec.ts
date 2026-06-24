@@ -190,6 +190,37 @@ suite('TextureUtils', () => {
       expect(skyboxDepth.name).to.be.eq(EQUI_URL);
     });
 
+    test(
+        'replaces a cached transient skybox when the source blob changes',
+        async () => {
+          const textureUtilsAny = textureUtils as any;
+          let loadCount = 0;
+          let disposeCount = 0;
+
+          textureUtilsAny.loadEquirect = async (url: string) => {
+            loadCount++;
+            return {
+              isTexture: true,
+              name: url,
+              mapping: EquirectangularReflectionMapping,
+              userData: {},
+              dispose() {
+                disposeCount++;
+              }
+            };
+          };
+
+          const first = await textureUtils.generateEnvironmentMapAndSkybox(
+              'blob:first', null, () => {}, false, null, 'panorama');
+          const second = await textureUtils.generateEnvironmentMapAndSkybox(
+              'blob:second', null, () => {}, false, null, 'panorama');
+
+          expect(first.skybox).to.not.equal(second.skybox);
+          expect(loadCount).to.be.eq(2);
+          expect(disposeCount).to.be.eq(1);
+          expect(textureUtilsAny.skyboxCache.size).to.be.eq(1);
+        });
+
     test('throws if given an invalid url', async () => {
       try {
         await textureUtils.generateEnvironmentMapAndSkybox();

@@ -52,10 +52,12 @@ export default class TextureUtils {
   private generatedEnvironmentMapAlt: Promise<CubeTexture>|null = null;
 
   private skyboxCache = new Map<string, Promise<Texture>>();
+  private skyboxCacheUrls = new Map<string, string>();
   private skyboxDepthCache = new Map<string, Promise<Texture>>();
 
   private blurMaterial: ShaderMaterial|null = null;
   private blurScene: Scene|null = null;
+  private blurTempTarget: WebGLCubeRenderTarget|null = null;
 
   constructor(private threeRenderer: WebGLRenderer) {
   }
@@ -293,12 +295,20 @@ export default class TextureUtils {
       url: string, withCredentials: boolean,
       progressCallback: (progress: number) => void,
       cacheKey: string|null = null): Promise<Texture> {
+    const isTransientUrl = TRANSIENT_URL_RE.test(url);
     const resolvedCacheKey = cacheKey != null && cacheKey !== '' ?
-        SKYBOX_CACHE_KEY_PREFIX + cacheKey + ':' + url :
+        SKYBOX_CACHE_KEY_PREFIX + cacheKey + (isTransientUrl ? '' : ':' + url) :
         url;
 
-    if (TRANSIENT_URL_RE.test(url) && resolvedCacheKey === url) {
+    if (isTransientUrl && resolvedCacheKey === url) {
       return this.loadEquirect(url, withCredentials, progressCallback);
+    }
+
+    const previousUrl = this.skyboxCacheUrls.get(resolvedCacheKey);
+    if (previousUrl != null && previousUrl !== url) {
+      const previousTexture = this.skyboxCache.get(resolvedCacheKey);
+      this.skyboxCache.delete(resolvedCacheKey);
+      void previousTexture?.then(texture => texture.dispose(), () => {});
     }
 
     if (!this.skyboxCache.has(resolvedCacheKey)) {
@@ -308,6 +318,7 @@ export default class TextureUtils {
         return texture;
       });
 
+      this.skyboxCacheUrls.set(resolvedCacheKey, url);
       this.skyboxCache.set(resolvedCacheKey, skyboxMapLoads);
     }
 
@@ -376,15 +387,14 @@ export default class TextureUtils {
       this.blurScene = new Scene();
       this.blurScene.add(blurMesh);
     }
-    const tempTarget = cubeTarget.clone();
+    let tempTarget = this.blurTempTarget;
+    if (tempTarget == null || tempTarget.width !== cubeTarget.width) {
+      tempTarget?.dispose();
+      tempTarget = cubeTarget.clone();
+      this.blurTempTarget = tempTarget;
+    }
     this.halfblur(cubeTarget, tempTarget, sigma, 'latitudinal');
     this.halfblur(tempTarget, cubeTarget, sigma, 'longitudinal');
-    // Disposing this target after we're done with it somehow corrupts Safari's
-    // whole graphics driver. It's random, but occurs more frequently on
-    // lower-powered GPUs (macbooks with intel graphics, older iPhones). It goes
-    // beyond just messing up the PMREM, as it also occasionally causes
-    // visible corruption on the canvas and even on the rest of the page.
-    /** tempTarget.dispose(); */
   }
 
   private halfblur(
@@ -538,10 +548,13 @@ export default class TextureUtils {
       const skybox = await promise;
       skybox.dispose();
     }
+    this.skyboxCache.clear();
+    this.skyboxCacheUrls.clear();
     for (const [, promise] of this.skyboxDepthCache) {
       const skyboxDepth = await promise;
       skyboxDepth.dispose();
     }
+    this.skyboxDepthCache.clear();
     if (this.generatedEnvironmentMap != null) {
       (await this.generatedEnvironmentMap).dispose();
       this.generatedEnvironmentMap = null;
@@ -552,6 +565,19 @@ export default class TextureUtils {
     }
     if (this.blurMaterial != null) {
       this.blurMaterial.dispose();
+      this.blurMaterial = null;
+    }
+    if (this.blurTempTarget != null) {
+      this.blurTempTarget.dispose();
+      this.blurTempTarget = null;
+    }
+    if (this.blurScene != null) {
+      for (const child of this.blurScene.children) {
+        const mesh = child as Mesh;
+        mesh.geometry?.dispose?.();
+      }
+      this.blurScene.clear();
+      this.blurScene = null;
     }
   }
 }
