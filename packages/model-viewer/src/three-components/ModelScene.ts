@@ -72,7 +72,7 @@ export interface SkyboxDofOptions {
   strength: number;
   maxBlur: number;
   focusSmoothing: number;
-  depthInvert: boolean;
+  depthInvert?: boolean;
 }
 
 interface SkyboxDofSampleCache {
@@ -795,23 +795,16 @@ export class ModelScene extends Scene {
     return {width: this.width, height: this.height};
   }
 
-  setEnvironmentAndSkybox(
-      environment: Texture|null, skybox: Texture|null,
-      skyboxDepth: Texture|null = null) {
+  setEnvironmentAndSkybox(environment: Texture|null, skybox: Texture|null) {
     if (this.element[$renderer].arRenderer.presentedScene === this) {
       return;
     }
     const previousEnvironment = this.environment;
     const previousSkybox = this.currentSkybox();
-    const previousSkyboxDepth = this.currentSkyboxDepth();
-    const useSkyboxDof = this.canUseSkyboxDof(skybox, skyboxDepth);
     const shouldTransitionSkybox =
-        !useSkyboxDof && this.shouldTransitionSkybox(previousSkybox, skybox);
+        this.shouldTransitionSkybox(previousSkybox, skybox);
     this.environment = environment;
-    if (useSkyboxDof) {
-      this.clearSkyboxTransition();
-      this.setSkyboxDof(skybox, skyboxDepth);
-    } else if (shouldTransitionSkybox) {
+    if (shouldTransitionSkybox) {
       this.clearSkyboxDof();
       this.startSkyboxTransition(previousSkybox, skybox);
     } else {
@@ -820,10 +813,9 @@ export class ModelScene extends Scene {
       this.setBackground(skybox);
     }
     this.disposeReplacedTransientTextures(
-        [previousEnvironment, previousSkybox, previousSkyboxDepth],
-        shouldTransitionSkybox ?
-            [environment, skybox, previousSkybox] :
-            [environment, skybox, skyboxDepth]);
+        [previousEnvironment, previousSkybox],
+        shouldTransitionSkybox ? [environment, skybox, previousSkybox] :
+                                 [environment, skybox]);
     this.queueRender();
   }
 
@@ -856,10 +848,6 @@ export class ModelScene extends Scene {
         this.background as Texture | null;
   }
 
-  private currentSkyboxDepth(): Texture|null {
-    return this.skyboxDofMesh?.parent != null ? this.skyboxDofDepth : null;
-  }
-
   setBackground(skybox: Texture|null) {
     this.clearSkyboxDof();
     this.groundedSkybox.map = skybox;
@@ -870,157 +858,6 @@ export class ModelScene extends Scene {
       this.target.remove(this.groundedSkybox);
       this.background = skybox;
     }
-  }
-
-  private canUseSkyboxDof(skybox: Texture|null, skyboxDepth: Texture|null) {
-    return skybox != null && skyboxDepth != null &&
-        !this.groundedSkybox.isUsable();
-  }
-
-  private createSkyboxDofMaterial(): ShaderMaterial {
-    return new ShaderMaterial({
-      depthWrite: false,
-      depthTest: false,
-      uniforms: {
-        skybox: {value: null},
-        depthMap: {value: null},
-        focus: {value: 1},
-        strength: {value: 1},
-        maxBlur: {value: 12},
-        depthInvert: {value: 0},
-        mapSize: {value: new Vector2(1, 1)}
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix *
-              vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D skybox;
-        uniform sampler2D depthMap;
-        uniform float focus;
-        uniform float strength;
-        uniform float maxBlur;
-        uniform float depthInvert;
-        uniform vec2 mapSize;
-        varying vec2 vUv;
-
-        float rgbToHue(vec3 color) {
-          float maxChannel = max(max(color.r, color.g), color.b);
-          float minChannel = min(min(color.r, color.g), color.b);
-          float delta = maxChannel - minChannel;
-          if (delta < 0.0001) {
-            return 0.0;
-          }
-
-          float hue;
-          if (maxChannel == color.r) {
-            hue = mod((color.g - color.b) / delta, 6.0);
-          } else if (maxChannel == color.g) {
-            hue = (color.b - color.r) / delta + 2.0;
-          } else {
-            hue = (color.r - color.g) / delta + 4.0;
-          }
-
-          return hue / 6.0;
-        }
-
-        float decodeDepthColor(vec3 color) {
-          float maxChannel = max(max(color.r, color.g), color.b);
-          float minChannel = min(min(color.r, color.g), color.b);
-          if (maxChannel - minChannel < 0.05) {
-            return color.r;
-          }
-
-          float hue = rgbToHue(color);
-          if (hue > 0.92) {
-            return 1.0;
-          }
-
-          return clamp((${COLORED_DEPTH_FAR_HUE.toFixed(2)} - hue) /
-              ${COLORED_DEPTH_FAR_HUE.toFixed(2)}, 0.0, 1.0);
-        }
-
-        float readDepth(vec2 uv) {
-          float depth = decodeDepthColor(texture2D(depthMap, uv).rgb);
-          return mix(depth, 1.0 - depth, depthInvert);
-        }
-
-        vec4 readSkybox(vec2 uv) {
-          return texture2D(skybox, vec2(fract(uv.x), clamp(uv.y, 0.0, 1.0)));
-        }
-
-        void main() {
-          float depth = readDepth(vUv);
-          float blurPixels = clamp(abs(depth - focus) * strength * maxBlur,
-              0.0, maxBlur);
-          vec2 texel = 1.0 / max(mapSize, vec2(1.0));
-          vec2 radius = texel * blurPixels;
-
-          vec4 color = readSkybox(vUv);
-          vec4 blurred = color * 0.18;
-          blurred += readSkybox(vUv + radius * vec2( 1.0,  0.0)) * 0.09;
-          blurred += readSkybox(vUv + radius * vec2(-1.0,  0.0)) * 0.09;
-          blurred += readSkybox(vUv + radius * vec2( 0.0,  1.0)) * 0.09;
-          blurred += readSkybox(vUv + radius * vec2( 0.0, -1.0)) * 0.09;
-          blurred += readSkybox(vUv + radius * vec2( 0.7,  0.7)) * 0.08;
-          blurred += readSkybox(vUv + radius * vec2(-0.7,  0.7)) * 0.08;
-          blurred += readSkybox(vUv + radius * vec2( 0.7, -0.7)) * 0.08;
-          blurred += readSkybox(vUv + radius * vec2(-0.7, -0.7)) * 0.08;
-          blurred += readSkybox(vUv + radius * vec2( 1.6,  0.3)) * 0.06;
-          blurred += readSkybox(vUv + radius * vec2(-1.6, -0.3)) * 0.06;
-          blurred += readSkybox(vUv + radius * vec2( 0.3, -1.6)) * 0.06;
-          blurred += readSkybox(vUv + radius * vec2(-0.3,  1.6)) * 0.06;
-
-          float blurMix = smoothstep(0.25, max(0.5, maxBlur), blurPixels);
-          gl_FragColor = mix(color, blurred, blurMix);
-        }
-      `
-    });
-  }
-
-  private getTextureDimensions(texture: Texture|null): Vector2 {
-    const image = texture?.image as
-        | {width?: number, height?: number, naturalWidth?: number,
-           naturalHeight?: number}
-        | undefined;
-    return new Vector2(
-        image?.naturalWidth || image?.width || 1,
-        image?.naturalHeight || image?.height || 1);
-  }
-
-  private setSkyboxDof(skybox: Texture|null, skyboxDepth: Texture|null) {
-    if (!this.canUseSkyboxDof(skybox, skyboxDepth)) {
-      this.clearSkyboxDof();
-      return;
-    }
-
-    this.target.remove(this.groundedSkybox);
-    this.background = null;
-    this.skyboxDofSkybox = skybox;
-    this.skyboxDofDepth = skyboxDepth;
-    this.skyboxDofSampleCache = null;
-
-    if (this.skyboxDofMesh == null) {
-      const geometry = new SphereGeometry(1, 64, 32);
-      geometry.scale(1, 1, -1);
-      const material = this.createSkyboxDofMaterial();
-      this.skyboxDofMesh = new Mesh(geometry, material);
-      this.skyboxDofMesh.name = 'SkyboxDepthOfField';
-      this.skyboxDofMesh.userData.noHit = true;
-      this.skyboxDofMesh.renderOrder = -1000;
-    }
-
-    const material = this.skyboxDofMesh.material;
-    material.uniforms.skybox.value = skybox;
-    material.uniforms.depthMap.value = skyboxDepth;
-    material.uniforms.mapSize.value.copy(this.getTextureDimensions(skybox));
-    this.updateSkyboxDofUniforms();
-    this.updateSkyboxDofTransform();
-    this.add(this.skyboxDofMesh);
   }
 
   private clearSkyboxDof() {

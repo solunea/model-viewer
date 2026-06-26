@@ -38,13 +38,11 @@ const $cancelEnvironmentUpdate = Symbol('cancelEnvironmentUpdate');
 export declare interface EnvironmentInterface {
   environmentImage: string|null;
   skyboxImage: string|null;
-  skyboxDepthImage: string|null;
   skyboxDofFocusMode: string;
   skyboxDofFocus: number;
   skyboxDofStrength: number;
   skyboxDofMaxBlur: number;
   skyboxDofFocusSmoothing: number;
-  skyboxDepthInvert: boolean;
   skyboxHeight: string;
   shadowIntensity: number;
   shadowSoftness: number;
@@ -54,8 +52,7 @@ export declare interface EnvironmentInterface {
   exposure: number;
   hasBakedShadow(): boolean;
   preloadSkybox(
-      skyboxImage?: string|null, environmentImage?: string|null,
-      skyboxDepthImage?: string|null): Promise<void>;
+      skyboxImage?: string|null, environmentImage?: string|null): Promise<void>;
 }
 
 export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
@@ -66,9 +63,6 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     @property({type: String, attribute: 'skybox-image'})
     skyboxImage: string|null = null;
-
-    @property({type: String, attribute: 'skybox-depth-image'})
-    skyboxDepthImage: string|null = null;
 
     @property({type: String, attribute: 'skybox-dof-focus-mode'})
     skyboxDofFocusMode: string = 'manual';
@@ -84,9 +78,6 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     @property({type: Number, attribute: 'skybox-dof-focus-smoothing'})
     skyboxDofFocusSmoothing: number = 140;
-
-    @property({type: Boolean, attribute: 'skybox-depth-invert'})
-    skyboxDepthInvert: boolean = false;
 
     @property(
         {type: Number, attribute: 'shadow-intensity', hasChanged: () => true})
@@ -173,8 +164,7 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
       }
 
       if ((changedProperties.has('environmentImage') ||
-           changedProperties.has('skyboxImage') ||
-           changedProperties.has('skyboxDepthImage')) &&
+           changedProperties.has('skyboxImage')) &&
           this[$shouldAttemptPreload]()) {
         this[$updateEnvironment]();
       }
@@ -183,15 +173,13 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
           changedProperties.has('skyboxDofFocus') ||
           changedProperties.has('skyboxDofStrength') ||
           changedProperties.has('skyboxDofMaxBlur') ||
-          changedProperties.has('skyboxDofFocusSmoothing') ||
-          changedProperties.has('skyboxDepthInvert')) {
+          changedProperties.has('skyboxDofFocusSmoothing')) {
         this[$scene].setSkyboxDofOptions({
           focusMode: this.skyboxDofFocusMode,
           focus: this.skyboxDofFocus,
           strength: this.skyboxDofStrength,
           maxBlur: this.skyboxDofMaxBlur,
-          focusSmoothing: this.skyboxDofFocusSmoothing,
-          depthInvert: this.skyboxDepthInvert
+          focusSmoothing: this.skyboxDofFocusSmoothing
         });
         this[$needsRender]();
       }
@@ -217,8 +205,7 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     async preloadSkybox(
         skyboxImage: string|null = this.skyboxImage,
-        environmentImage: string|null = this.environmentImage,
-        skyboxDepthImage: string|null = this.skyboxDepthImage): Promise<void> {
+        environmentImage: string|null = this.environmentImage): Promise<void> {
       const {textureUtils} = this[$renderer];
       if (textureUtils == null) {
         return;
@@ -226,12 +213,11 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
       await textureUtils.generateEnvironmentMapAndSkybox(
           deserializeUrl(skyboxImage), environmentImage, () => {},
-          this.withCredentials, skyboxDepthImage,
-          this.getSkyboxCacheKey(skyboxImage));
+          this.withCredentials, this.getSkyboxCacheKey(skyboxImage));
     }
 
     async[$updateEnvironment]() {
-      const {skyboxDepthImage, skyboxImage, environmentImage} = this;
+      const {skyboxImage, environmentImage} = this;
 
       if (this[$cancelEnvironmentUpdate] != null) {
         this[$cancelEnvironmentUpdate]!();
@@ -248,13 +234,12 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
           this[$progressTracker].beginActivity('environment-update');
 
       try {
-        const {environmentMap, skybox, skyboxDepth} =
+        const {environmentMap, skybox} =
             await textureUtils.generateEnvironmentMapAndSkybox(
                 deserializeUrl(skyboxImage),
                 environmentImage,
                 (progress: number) => updateEnvProgress(clamp(progress, 0, 1)),
                 this.withCredentials,
-                skyboxDepthImage,
                 this.getSkyboxCacheKey(skyboxImage));
 
         if (this[$currentEnvironmentMap] !== environmentMap) {
@@ -275,15 +260,13 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
           focus: this.skyboxDofFocus,
           strength: this.skyboxDofStrength,
           maxBlur: this.skyboxDofMaxBlur,
-          focusSmoothing: this.skyboxDofFocusSmoothing,
-          depthInvert: this.skyboxDepthInvert
+          focusSmoothing: this.skyboxDofFocusSmoothing
         });
         this[$scene].setEnvironmentAndSkybox(
-            this[$currentEnvironmentMap], this[$currentBackground],
-            skyboxDepth);
+            this[$currentEnvironmentMap], this[$currentBackground]);
       } catch (errorOrPromise) {
         if (errorOrPromise instanceof Error) {
-          this[$scene].setEnvironmentAndSkybox(null, null, null);
+          this[$scene].setEnvironmentAndSkybox(null, null);
           throw errorOrPromise;
         }
       } finally {

@@ -180,16 +180,6 @@ suite('TextureUtils', () => {
               .to.be.eq(EquirectangularReflectionMapping);
         });
 
-    test('returns a skybox depth texture from url', async () => {
-      const textures = await textureUtils.generateEnvironmentMapAndSkybox(
-          EQUI_URL, null, () => {}, false, EQUI_URL);
-
-      const skyboxDepth = textures.skyboxDepth!;
-
-      expect(skyboxDepth.isTexture).to.be.ok;
-      expect(skyboxDepth.name).to.be.eq(EQUI_URL);
-    });
-
     test(
         'replaces a cached transient skybox when the source blob changes',
         async () => {
@@ -211,9 +201,9 @@ suite('TextureUtils', () => {
           };
 
           const first = await textureUtils.generateEnvironmentMapAndSkybox(
-              'blob:first', null, () => {}, false, null, 'panorama');
+              'blob:first', null, () => {}, false, 'panorama');
           const second = await textureUtils.generateEnvironmentMapAndSkybox(
-              'blob:second', null, () => {}, false, null, 'panorama');
+              'blob:second', null, () => {}, false, 'panorama');
 
           expect(first.skybox).to.not.equal(second.skybox);
           expect(loadCount).to.be.eq(2);
