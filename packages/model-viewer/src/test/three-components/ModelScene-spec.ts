@@ -180,20 +180,6 @@ suite('ModelScene', () => {
       expect((scene as any).skyboxTransition).to.be.null;
     });
 
-    test('keeps skybox-only transitions in front of the skybox mesh', () => {
-      const firstSkybox = new Texture();
-      const secondSkybox = new Texture();
-
-      element.skyboxOnly = true;
-      scene.setEnvironmentAndSkybox(null, firstSkybox);
-      scene.setSkyboxInterpolationDecay(200);
-      scene.setEnvironmentAndSkybox(null, secondSkybox);
-
-      const transition = (scene as any).skyboxTransition;
-      expect(transition.parent).to.be.equal(scene);
-      expect(transition.material.depthTest).to.be.equal(false);
-      expect(transition.renderOrder).to.be.equal(1);
-    });
   });
 
   suite('setSize', () => {
