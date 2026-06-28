@@ -73,6 +73,23 @@ suite('TextureUtils', () => {
       expect(texture.name).to.be.eq(EQUI_URL);
       expect(texture.mapping).to.be.eq(EquirectangularReflectionMapping);
     });
+    test('loads a LDR equirect without the HDR JPG gainmap path', async () => {
+      const textureUtilsAny = textureUtils as any;
+      const originalImageLoader = textureUtilsAny.imageLoader;
+      let imageLoaderCalled = false;
+      textureUtilsAny.imageLoader = function(...args: unknown[]) {
+        imageLoaderCalled = true;
+        return originalImageLoader.apply(this, args);
+      };
+
+      try {
+        const texture = await textureUtils.loadEquirect(EQUI_URL);
+        texture.dispose();
+        expect(imageLoaderCalled).to.be.eq(false);
+      } finally {
+        textureUtilsAny.imageLoader = originalImageLoader;
+      }
+    });
     test('decodes a gainmap and disposes intermediate render targets', async () => {
       const GAINMAP_URL = assetPath('environments/spruit_sunrise_1k_HDR.jpg');
       const THREE = await import('three');

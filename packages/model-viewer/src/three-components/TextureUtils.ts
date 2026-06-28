@@ -33,11 +33,38 @@ const GENERATED_SIGMA = 0.04;
 const MAX_SAMPLES = 20;
 
 const HDR_FILE_RE = /\.hdr(\.js)?$/;
+const HDR_JPG_FILE_RE = /(?:^|[_-])(?:hdr|gainmap)(?:[_-]|\.)/i;
 const KTX2_FILE_RE = /\.ktx2(\?|#|$)/;
 const TRANSIENT_URL_RE = /^(blob:|data:)/i;
 const SKYBOX_CACHE_KEY_PREFIX = 'skybox:';
 
 export const SKYBOX_CACHE_KEY = 'modelViewerSkyboxCacheKey';
+
+function disposeGainMapQuadRenderer(
+    renderer: QuadRenderer<1016, GainMapDecoderMaterial>,
+    disposeRenderTarget: boolean) {
+  const rendererInternals = renderer as any;
+  try {
+    renderer.dispose(disposeRenderTarget);
+  } finally {
+    try {
+      rendererInternals._quad?.removeFromParent?.();
+    } catch (e) {
+    }
+    try {
+      rendererInternals._scene?.clear?.();
+    } catch (e) {
+    }
+
+    rendererInternals._quad = null;
+    rendererInternals._scene = null;
+    rendererInternals._camera = null;
+    rendererInternals._material = null;
+    if (disposeRenderTarget) {
+      rendererInternals._renderTarget = null;
+    }
+  }
+}
 
 export default class TextureUtils {
   public lottieLoaderUrl = '';
@@ -137,10 +164,22 @@ export default class TextureUtils {
       Promise<Texture> {
     try {
       const isHDR: boolean = HDR_FILE_RE.test(url);
-      const loader = isHDR ? this.hdrLoader(withCredentials) :
-                             this.imageLoader(withCredentials);
-      const texture: Texture = await new Promise<Texture>(
-          (resolve, reject) => loader.load(
+      const isHDRJpg: boolean = HDR_JPG_FILE_RE.test(deserializeUrl(url) || url);
+      let texture: Texture;
+      if (!isHDR && !isHDRJpg) {
+        texture = await new Promise<Texture>(
+            (resolve, reject) => this.ldrLoader(withCredentials).load(
+                url,
+                resolve,
+                (event: {loaded: number, total: number}) => {
+                  progressCallback(event.loaded / event.total * 0.9);
+                },
+                reject));
+      } else {
+        const loader = isHDR ? this.hdrLoader(withCredentials) :
+                               this.imageLoader(withCredentials);
+        texture = await new Promise<Texture>(
+            (resolve, reject) => loader.load(
               url,
               (result: any) => {
                 const {renderTarget} =
@@ -161,16 +200,16 @@ export default class TextureUtils {
                     }
                     if (hasContent) {
                       texture = dataTexture;
-                      result.dispose(true);
+                      disposeGainMapQuadRenderer(result, true);
                     } else {
                       console.warn('Decoded DataTexture is completely black, falling back to render target texture.');
                       texture = renderTarget.texture;
-                      result.dispose(false);
+                      disposeGainMapQuadRenderer(result, false);
                     }
                   } catch (e) {
                     console.warn('Failed to convert gainmap to DataTexture, falling back to render target texture:', e);
                     texture = renderTarget.texture;
-                    result.dispose(false);
+                    disposeGainMapQuadRenderer(result, false);
                   }
                   resolve(texture);
                 } else {
@@ -181,6 +220,7 @@ export default class TextureUtils {
                 progressCallback(event.loaded / event.total * 0.9);
               },
               reject));
+      }
 
       progressCallback(1.0);
 
