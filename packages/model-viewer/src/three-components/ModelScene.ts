@@ -1068,12 +1068,15 @@ export class ModelScene extends Scene {
     }
   }
 
+  private isSkyboxOnlyMode() {
+    return this.element.skyboxOnly === true ||
+        this.element.hasAttribute('skybox-only');
+  }
+
   private shouldTransitionSkybox(
       previousSkybox: Texture|null, nextSkybox: Texture|null) {
     const isInitialSkybox = previousSkybox == null && nextSkybox != null;
-    const isSkyboxOnly =
-        this.element.skyboxOnly === true ||
-        this.element.hasAttribute('skybox-only');
+    const isSkyboxOnly = this.isSkyboxOnlyMode();
 
     return this.skyboxInterpolationDecay > 0 &&
         (!isSkyboxOnly || !isInitialSkybox) &&
@@ -1084,7 +1087,7 @@ export class ModelScene extends Scene {
   private startSkyboxTransition(
       previousSkybox: Texture|null, nextSkybox: Texture|null) {
     if (this.skyboxTransition == null) {
-      const geometry = new SphereGeometry(1, 64, 32);
+      const geometry = new SphereGeometry(1, 32, 16);
       geometry.scale(1, 1, -1);
       const material = new MeshBasicMaterial({
         depthWrite: false,
@@ -1099,13 +1102,16 @@ export class ModelScene extends Scene {
 
     const transition = this.skyboxTransition;
     const fadingIn = nextSkybox != null;
+    const skyboxOnly = this.isSkyboxOnlyMode();
     this.setBackground(fadingIn ? previousSkybox : null);
     transition.material.map = fadingIn ? nextSkybox : previousSkybox;
+    transition.material.depthTest = !skyboxOnly;
     this.skyboxTransitionOpacity = fadingIn ? 0 : 1;
     this.skyboxTransitionGoal = fadingIn ? 1 : 0;
     this.skyboxTransitionPending = nextSkybox;
     transition.material.opacity = this.skyboxTransitionOpacity;
     transition.material.needsUpdate = true;
+    transition.renderOrder = skyboxOnly ? 1 : 0;
     this.add(transition);
     this.updateSkyboxTransitionTransform();
   }
