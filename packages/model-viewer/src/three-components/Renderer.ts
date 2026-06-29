@@ -17,7 +17,7 @@ import {Event, EventDispatcher, NeutralToneMapping, Vector2, WebGLRenderer} from
 
 import {$updateEnvironment} from '../features/environment.js';
 import {ModelViewerGlobalConfig} from '../features/loading.js';
-import ModelViewerElementBase, {$canvas, $syncControlsWithCamera, $tick, $updateSize} from '../model-viewer-base.js';
+import ModelViewerElementBase, {$canvas, $tick, $updateSize} from '../model-viewer-base.js';
 import {clamp, isDebugMode} from '../utilities.js';
 
 import {ARRenderer} from './ARRenderer.js';
@@ -25,7 +25,7 @@ import {CachingGLTFLoader} from './CachingGLTFLoader.js';
 import {ModelViewerGLTFInstance} from './gltf-instance/ModelViewerGLTFInstance.js';
 import {ModelScene} from './ModelScene.js';
 import TextureUtils from './TextureUtils.js';
-import {ModelViewerViewHelper} from './ViewHelper.js';
+import {ModelViewerViewHelper, ViewHelperOrbit} from './ViewHelper.js';
 
 export interface RendererOptions {
   powerPreference: string;
@@ -322,11 +322,6 @@ export class Renderer extends
   }
 
   private shouldRender(scene: ModelScene): boolean {
-    const viewHelper = this.viewHelpers.get(scene);
-    if (viewHelper?.animating) {
-      return true;
-    }
-
     if (!scene.shouldRender()) {
       // The first frame we stop rendering the scene (because it stops moving),
       // trigger one extra render at full scale.
@@ -416,14 +411,6 @@ export class Renderer extends
     });
   }
 
-  private updateViewHelper(scene: ModelScene, delta: number) {
-    const viewHelper = this.viewHelpers.get(scene);
-    if (viewHelper?.update(delta)) {
-      scene.element[$syncControlsWithCamera]();
-      scene.queueRender();
-    }
-  }
-
   hasViewHelperAtPoint(scene: ModelScene, event: PointerEvent): boolean {
     if (!scene.element.viewHelper) {
       return false;
@@ -433,17 +420,15 @@ export class Renderer extends
         event, scene.element.getBoundingClientRect()) === true;
   }
 
-  handleViewHelperClick(scene: ModelScene, event: PointerEvent): boolean {
+  handleViewHelperClick(scene: ModelScene, event: PointerEvent):
+      ViewHelperOrbit|null {
     if (!scene.element.viewHelper) {
-      return false;
+      return null;
     }
 
-    const handled = this.viewHelpers.get(scene)?.handleClick(
-        event, scene.element.getBoundingClientRect()) === true;
-    if (handled) {
-      scene.queueRender();
-    }
-    return handled;
+    return this.viewHelpers.get(scene)?.handleClick(
+               event, scene.element.getBoundingClientRect()) ||
+        null;
   }
 
   private copyPixels(scene: ModelScene, width: number, height: number) {
@@ -532,7 +517,6 @@ export class Renderer extends
 
       this.preRender(scene, t, delta);
       scene.updateSkyboxDof(delta);
-      this.updateViewHelper(scene, delta);
 
       if (!this.shouldRender(scene)) {
         continue;

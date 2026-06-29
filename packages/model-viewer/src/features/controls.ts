@@ -17,7 +17,7 @@ import {property} from 'lit/decorators.js';
 import {Event, PerspectiveCamera, Spherical, Vector3} from 'three';
 
 import {style} from '../decorators.js';
-import ModelViewerElementBase, {$ariaLabel, $container, $getModelIsVisible, $loadedTime, $needsRender, $onModelLoad, $onResize, $renderer, $scene, $syncControlsWithCamera, $tick, $updateStatus, $userInputElement, toVector3D, Vector3D} from '../model-viewer-base.js';
+import ModelViewerElementBase, {$ariaLabel, $container, $getModelIsVisible, $loadedTime, $needsRender, $onModelLoad, $onResize, $renderer, $scene, $tick, $updateStatus, $userInputElement, toVector3D, Vector3D} from '../model-viewer-base.js';
 import {degreesToRadians, normalizeUnit} from '../styles/conversions.js';
 import {EvaluatedStyle, Intrinsics, SphericalIntrinsics, StyleEvaluator, Vector3Intrinsics} from '../styles/evaluators.js';
 import {IdentNode, NumberNode, numberNode, parseExpressions} from '../styles/parsers.js';
@@ -251,7 +251,9 @@ const $syncCameraOrbit = Symbol('syncCameraOrbit');
 const $syncFieldOfView = Symbol('syncFieldOfView');
 const $syncCameraTarget = Symbol('syncCameraTarget');
 const $onViewHelperPointerDown = Symbol('onViewHelperPointerDown');
+const $onViewHelperPointerMove = Symbol('onViewHelperPointerMove');
 const $onViewHelperPointerUp = Symbol('onViewHelperPointerUp');
+const $onViewHelperPointerLeave = Symbol('onViewHelperPointerLeave');
 
 const $syncMinCameraOrbit = Symbol('syncMinCameraOrbit');
 const $syncMaxCameraOrbit = Symbol('syncMaxCameraOrbit');
@@ -414,6 +416,7 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     protected[$lastPromptOffset] = 0;
     protected viewHelperPointerId: number|null = null;
+    protected viewHelperPointerHover = false;
     protected[$promptElementVisibleTime] = Infinity;
     protected[$userHasInteracted] = false;
     protected[$waitingToPromptUser] = false;
@@ -508,7 +511,13 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       this[$userInputElement].addEventListener(
           'pointerdown', this[$onViewHelperPointerDown] as EventListener, true);
       this[$userInputElement].addEventListener(
+          'pointermove', this[$onViewHelperPointerMove] as EventListener, true);
+      this[$userInputElement].addEventListener(
           'pointerup', this[$onViewHelperPointerUp] as EventListener, true);
+      this[$userInputElement].addEventListener(
+          'pointerleave',
+          this[$onViewHelperPointerLeave] as EventListener,
+          true);
     }
 
     disconnectedCallback() {
@@ -525,7 +534,13 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       this[$userInputElement].removeEventListener(
           'pointerdown', this[$onViewHelperPointerDown] as EventListener, true);
       this[$userInputElement].removeEventListener(
+          'pointermove', this[$onViewHelperPointerMove] as EventListener, true);
+      this[$userInputElement].removeEventListener(
           'pointerup', this[$onViewHelperPointerUp] as EventListener, true);
+      this[$userInputElement].removeEventListener(
+          'pointerleave',
+          this[$onViewHelperPointerLeave] as EventListener,
+          true);
     }
 
     updated(changedProperties: Map<string|number|symbol, unknown>) {
@@ -1014,11 +1029,6 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
           'camera-change', {detail: {source}}));
     };
 
-    [$syncControlsWithCamera]() {
-      this[$controls].syncOrbitFromCamera();
-      this[$onChange]();
-    }
-
     [$onViewHelperPointerDown] = (event: PointerEvent) => {
       if (!this[$renderer].hasViewHelperAtPoint(this[$scene], event)) {
         return;
@@ -1030,6 +1040,22 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       event.stopImmediatePropagation();
     };
 
+    [$onViewHelperPointerMove] = (event: PointerEvent) => {
+      if (event.buttons !== 0) {
+        return;
+      }
+
+      const hover =
+          this[$renderer].hasViewHelperAtPoint(this[$scene], event);
+      if (hover === this.viewHelperPointerHover) {
+        return;
+      }
+
+      this.viewHelperPointerHover = hover;
+      this[$userInputElement].style.cursor =
+          hover ? 'pointer' : this.cameraControls ? 'grab' : '';
+    };
+
     [$onViewHelperPointerUp] = (event: PointerEvent) => {
       if (event.pointerId !== this.viewHelperPointerId) {
         return;
@@ -1039,11 +1065,24 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       event.preventDefault();
       event.stopImmediatePropagation();
 
-      if (this[$renderer].handleViewHelperClick(this[$scene], event)) {
+      const orbit = this[$renderer].handleViewHelperClick(this[$scene], event);
+      if (orbit != null) {
         this[$controls].changeSource = ChangeSource.USER_INTERACTION;
+        if (this[$controls].setOrbit(orbit.theta, orbit.phi, orbit.radius)) {
+          this[$onChange]();
+        }
         this[$controls].dispatchEvent({type: 'user-interaction'});
-        this[$needsRender]();
       }
+    };
+
+    [$onViewHelperPointerLeave] = () => {
+      if (!this.viewHelperPointerHover) {
+        return;
+      }
+
+      this.viewHelperPointerHover = false;
+      this[$userInputElement].style.cursor =
+          this.cameraControls ? 'grab' : '';
     };
 
     [$onPointerChange] = (event: PointerChangeEvent) => {

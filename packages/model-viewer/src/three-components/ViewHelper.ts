@@ -14,6 +14,7 @@
  */
 
 import type {Camera, WebGLRenderer} from 'three';
+import {Spherical} from 'three';
 import {ViewHelper} from 'three/examples/jsm/helpers/ViewHelper.js';
 
 const VIEW_HELPER_SIZE = 128;
@@ -26,6 +27,12 @@ export interface ViewHelperViewport {
   canvasWidth: number;
   canvasHeight: number;
   renderedDpr: number;
+}
+
+export interface ViewHelperOrbit {
+  theta: number;
+  phi: number;
+  radius: number;
 }
 
 interface ViewHelperDomElement {
@@ -50,7 +57,7 @@ export class ModelViewerViewHelper {
 
   private readonly viewHelper: ViewHelper;
 
-  constructor(camera: Camera) {
+  constructor(private readonly camera: Camera) {
     this.viewHelper =
         new ViewHelper(camera, this.domElement as unknown as HTMLElement);
   }
@@ -66,9 +73,10 @@ export class ModelViewerViewHelper {
     this.domElement.offsetHeight = canvasHeight;
 
     this.viewHelper.location.left = null;
-    this.viewHelper.location.top = null;
+    this.viewHelper.location.top = Math.max(
+        0, canvasHeight - y - height);
     this.viewHelper.location.right = Math.max(0, canvasWidth - x - width);
-    this.viewHelper.location.bottom = Math.max(0, y);
+    this.viewHelper.location.bottom = 0;
 
     const autoClear = renderer.autoClear;
     renderer.autoClear = false;
@@ -88,31 +96,35 @@ export class ModelViewerViewHelper {
     const {viewport} = this;
     const helperLeft = viewport!.x + viewport!.width - VIEW_HELPER_SIZE;
     const helperRight = viewport!.x + viewport!.width;
-    const helperTop =
-        viewport!.canvasHeight - viewport!.y - VIEW_HELPER_SIZE;
-    const helperBottom = viewport!.canvasHeight - viewport!.y;
+    const helperTop = viewport!.canvasHeight - viewport!.y - viewport!.height;
+    const helperBottom = helperTop + VIEW_HELPER_SIZE;
 
     return pointer.clientX >= helperLeft && pointer.clientX <= helperRight &&
         pointer.clientY >= helperTop && pointer.clientY <= helperBottom;
   }
 
-  handleClick(event: PointerEvent, elementRect: DOMRect): boolean {
+  handleClick(event: PointerEvent, elementRect: DOMRect):
+      ViewHelperOrbit|null {
     const pointer = this.eventToRendererPoint(event, elementRect);
-    return pointer == null ? false :
-                             this.viewHelper.handleClick(pointer as MouseEvent);
-  }
-
-  update(deltaMilliseconds: number): boolean {
-    if (!this.viewHelper.animating) {
-      return false;
+    if (pointer == null) {
+      return null;
     }
 
-    this.viewHelper.update(deltaMilliseconds / 1000);
-    return true;
-  }
+    const cameraPosition = this.camera.position.clone();
+    const cameraQuaternion = this.camera.quaternion.clone();
+    const handled = this.viewHelper.handleClick(pointer as MouseEvent);
+    if (!handled) {
+      return null;
+    }
 
-  get animating(): boolean {
-    return this.viewHelper.animating;
+    this.viewHelper.update(1);
+    const {theta, phi, radius} =
+        new Spherical().setFromVector3(this.camera.position);
+    this.camera.position.copy(cameraPosition);
+    this.camera.quaternion.copy(cameraQuaternion);
+    this.camera.updateMatrixWorld();
+
+    return {theta, phi, radius};
   }
 
   dispose() {

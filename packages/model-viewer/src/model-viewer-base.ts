@@ -63,7 +63,6 @@ export const $userInputElement = Symbol('input');
 export const $canvas = Symbol('canvas');
 export const $scene = Symbol('scene');
 export const $needsRender = Symbol('needsRender');
-export const $syncControlsWithCamera = Symbol('syncControlsWithCamera');
 export const $tick = Symbol('tick');
 export const $onModelLoad = Symbol('onModelLoad');
 export const $onResize = Symbol('onResize');
@@ -654,9 +653,6 @@ export default class ModelViewerElementBase extends ReactiveElement {
 
   [$needsRender]() {
     this[$scene].queueRender();
-  }
-
-  [$syncControlsWithCamera]() {
   }
 
   [$onModelLoad]() {
