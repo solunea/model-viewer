@@ -17,7 +17,7 @@ import {property} from 'lit/decorators.js';
 import {Event, PerspectiveCamera, Spherical, Vector3} from 'three';
 
 import {style} from '../decorators.js';
-import ModelViewerElementBase, {$ariaLabel, $container, $getModelIsVisible, $loadedTime, $needsRender, $onModelLoad, $onResize, $renderer, $scene, $tick, $updateStatus, $userInputElement, toVector3D, Vector3D} from '../model-viewer-base.js';
+import ModelViewerElementBase, {$ariaLabel, $container, $getModelIsVisible, $loadedTime, $needsRender, $onModelLoad, $onResize, $renderer, $scene, $syncControlsWithCamera, $tick, $updateStatus, $userInputElement, toVector3D, Vector3D} from '../model-viewer-base.js';
 import {degreesToRadians, normalizeUnit} from '../styles/conversions.js';
 import {EvaluatedStyle, Intrinsics, SphericalIntrinsics, StyleEvaluator, Vector3Intrinsics} from '../styles/evaluators.js';
 import {IdentNode, NumberNode, numberNode, parseExpressions} from '../styles/parsers.js';
@@ -250,6 +250,8 @@ const $maintainThetaPhi = Symbol('maintainThetaPhi');
 const $syncCameraOrbit = Symbol('syncCameraOrbit');
 const $syncFieldOfView = Symbol('syncFieldOfView');
 const $syncCameraTarget = Symbol('syncCameraTarget');
+const $onViewHelperPointerDown = Symbol('onViewHelperPointerDown');
+const $onViewHelperPointerUp = Symbol('onViewHelperPointerUp');
 
 const $syncMinCameraOrbit = Symbol('syncMinCameraOrbit');
 const $syncMaxCameraOrbit = Symbol('syncMaxCameraOrbit');
@@ -411,6 +413,7 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
         this.shadowRoot!.querySelector('.pan-target') as HTMLElement;
 
     protected[$lastPromptOffset] = 0;
+    protected viewHelperPointerId: number|null = null;
     protected[$promptElementVisibleTime] = Infinity;
     protected[$userHasInteracted] = false;
     protected[$waitingToPromptUser] = false;
@@ -502,6 +505,10 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       this[$controls].addEventListener(
           'pointer-change-end',
           this[$onPointerChange] as (event: Event) => void);
+      this[$userInputElement].addEventListener(
+          'pointerdown', this[$onViewHelperPointerDown] as EventListener, true);
+      this[$userInputElement].addEventListener(
+          'pointerup', this[$onViewHelperPointerUp] as EventListener, true);
     }
 
     disconnectedCallback() {
@@ -515,6 +522,10 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       this[$controls].removeEventListener(
           'pointer-change-end',
           this[$onPointerChange] as (event: Event) => void);
+      this[$userInputElement].removeEventListener(
+          'pointerdown', this[$onViewHelperPointerDown] as EventListener, true);
+      this[$userInputElement].removeEventListener(
+          'pointerup', this[$onViewHelperPointerUp] as EventListener, true);
     }
 
     updated(changedProperties: Map<string|number|symbol, unknown>) {
@@ -1001,6 +1012,38 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
 
       this.dispatchEvent(new CustomEvent<CameraChangeDetails>(
           'camera-change', {detail: {source}}));
+    };
+
+    [$syncControlsWithCamera]() {
+      this[$controls].syncOrbitFromCamera();
+      this[$onChange]();
+    }
+
+    [$onViewHelperPointerDown] = (event: PointerEvent) => {
+      if (!this[$renderer].hasViewHelperAtPoint(this[$scene], event)) {
+        return;
+      }
+
+      this.viewHelperPointerId = event.pointerId;
+      this[$userInputElement].focus();
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+
+    [$onViewHelperPointerUp] = (event: PointerEvent) => {
+      if (event.pointerId !== this.viewHelperPointerId) {
+        return;
+      }
+
+      this.viewHelperPointerId = null;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      if (this[$renderer].handleViewHelperClick(this[$scene], event)) {
+        this[$controls].changeSource = ChangeSource.USER_INTERACTION;
+        this[$controls].dispatchEvent({type: 'user-interaction'});
+        this[$needsRender]();
+      }
     };
 
     [$onPointerChange] = (event: PointerChangeEvent) => {

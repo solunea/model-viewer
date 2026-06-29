@@ -25,6 +25,7 @@ export interface ViewHelperViewport {
   height: number;
   canvasWidth: number;
   canvasHeight: number;
+  renderedDpr: number;
 }
 
 interface ViewHelperDomElement {
@@ -37,6 +38,8 @@ interface ViewHelperDomElement {
  * Adapts Three.js ViewHelper to model-viewer's shared renderer viewport model.
  */
 export class ModelViewerViewHelper {
+  private viewport: ViewHelperViewport|null = null;
+
   private readonly domElement: ViewHelperDomElement = {
     offsetWidth: 1,
     offsetHeight: 1,
@@ -53,6 +56,7 @@ export class ModelViewerViewHelper {
   }
 
   render(renderer: WebGLRenderer, viewport: ViewHelperViewport) {
+    this.viewport = viewport;
     const {canvasWidth, canvasHeight, x, y, width, height} = viewport;
     if (width < VIEW_HELPER_SIZE || height < VIEW_HELPER_SIZE) {
       return;
@@ -75,7 +79,59 @@ export class ModelViewerViewHelper {
     }
   }
 
+  containsPoint(event: PointerEvent, elementRect: DOMRect): boolean {
+    const pointer = this.eventToRendererPoint(event, elementRect);
+    if (pointer == null) {
+      return false;
+    }
+
+    const {viewport} = this;
+    const helperLeft = viewport!.x + viewport!.width - VIEW_HELPER_SIZE;
+    const helperRight = viewport!.x + viewport!.width;
+    const helperTop =
+        viewport!.canvasHeight - viewport!.y - VIEW_HELPER_SIZE;
+    const helperBottom = viewport!.canvasHeight - viewport!.y;
+
+    return pointer.clientX >= helperLeft && pointer.clientX <= helperRight &&
+        pointer.clientY >= helperTop && pointer.clientY <= helperBottom;
+  }
+
+  handleClick(event: PointerEvent, elementRect: DOMRect): boolean {
+    const pointer = this.eventToRendererPoint(event, elementRect);
+    return pointer == null ? false :
+                             this.viewHelper.handleClick(pointer as MouseEvent);
+  }
+
+  update(deltaMilliseconds: number): boolean {
+    if (!this.viewHelper.animating) {
+      return false;
+    }
+
+    this.viewHelper.update(deltaMilliseconds / 1000);
+    return true;
+  }
+
+  get animating(): boolean {
+    return this.viewHelper.animating;
+  }
+
   dispose() {
     this.viewHelper.dispose();
+  }
+
+  private eventToRendererPoint(event: PointerEvent, elementRect: DOMRect):
+      Pick<MouseEvent, 'clientX'|'clientY'>|null {
+    const {viewport} = this;
+    if (viewport == null || viewport.width < VIEW_HELPER_SIZE ||
+        viewport.height < VIEW_HELPER_SIZE) {
+      return null;
+    }
+
+    const {x, y, height, canvasHeight, renderedDpr} = viewport;
+    const sceneTop = canvasHeight - y - height;
+    return {
+      clientX: x + (event.clientX - elementRect.left) * renderedDpr,
+      clientY: sceneTop + (event.clientY - elementRect.top) * renderedDpr
+    };
   }
 }

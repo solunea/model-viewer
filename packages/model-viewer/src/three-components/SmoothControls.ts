@@ -302,6 +302,10 @@ export class SmoothControls extends EventDispatcher<{
     this.goalLogFov = this.logFov;
   }
 
+  syncOrbitFromCamera() {
+    this.syncOrbitStateFromCamera();
+  }
+
   private snapOrbitToGoal() {
     this.spherical.copy(this.goalSpherical);
     this.logFov = this.goalLogFov;
