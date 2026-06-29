@@ -1069,7 +1069,9 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       if (orbit != null) {
         this[$controls].changeSource = ChangeSource.USER_INTERACTION;
         if (this[$controls].setOrbit(orbit.theta, orbit.phi, orbit.radius)) {
-          this[$onChange]();
+          // Let SmoothControls emit camera-change after the camera has moved,
+          // so listeners that read getCameraOrbit() do not capture stale state.
+          this[$needsRender]();
         }
         this[$controls].dispatchEvent({type: 'user-interaction'});
       }
