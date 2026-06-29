@@ -186,6 +186,9 @@ export default class ModelViewerElementBase extends ReactiveElement {
   @property({type: Boolean, attribute: 'generate-schema'})
   generateSchema = false;
 
+  @property({type: Boolean, attribute: 'view-helper'})
+  viewHelper = false;
+
   protected[$isElementInViewport] = false;
   protected[$loaded] = false;
   protected[$loadedTime] = 0;
@@ -489,6 +492,10 @@ export default class ModelViewerElementBase extends ReactiveElement {
       } else {
         this[$scene].updateSchema(null);
       }
+    }
+
+    if (changedProperties.has('viewHelper')) {
+      this[$needsRender]();
     }
   }
 

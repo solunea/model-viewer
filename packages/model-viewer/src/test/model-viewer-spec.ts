@@ -109,6 +109,16 @@ suite('ModelViewerElement', () => {
 
   BasicSpecTemplate(() => ModelViewer, () => tagName);
 
+  test('exposes the view-helper attribute', () => {
+    const element = new ModelViewer();
+
+    element.setAttribute('view-helper', '');
+    expect(element.viewHelper).to.be.eq(true);
+
+    element.removeAttribute('view-helper');
+    expect(element.viewHelper).to.be.eq(false);
+  });
+
   suite('Render Functionality Test', () => {
     let element: ModelViewerElement;
 

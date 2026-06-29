@@ -25,6 +25,7 @@ import {CachingGLTFLoader} from './CachingGLTFLoader.js';
 import {ModelViewerGLTFInstance} from './gltf-instance/ModelViewerGLTFInstance.js';
 import {ModelScene} from './ModelScene.js';
 import TextureUtils from './TextureUtils.js';
+import {ModelViewerViewHelper} from './ViewHelper.js';
 
 export interface RendererOptions {
   powerPreference: string;
@@ -111,6 +112,7 @@ export class Renderer extends
   private lastStep = DEFAULT_LAST_STEP;
   private avgFrameDuration =
       (HIGH_FRAME_DURATION_MS + LOW_FRAME_DURATION_MS) / 2;
+  private viewHelpers = new Map<ModelScene, ModelViewerViewHelper>();
 
   get canRender() {
     return this.threeRenderer != null;
@@ -197,6 +199,7 @@ export class Renderer extends
 
   unregisterScene(scene: ModelScene) {
     this.scenes.delete(scene);
+    this.disposeViewHelper(scene);
 
     if (this.canvas3D.parentElement === scene.canvas.parentElement) {
       scene.canvas.parentElement!.removeChild(this.canvas3D);
@@ -375,6 +378,38 @@ export class Renderer extends
     return {width, height};
   }
 
+  private disposeViewHelper(scene: ModelScene) {
+    const viewHelper = this.viewHelpers.get(scene);
+    if (viewHelper == null) {
+      return;
+    }
+    viewHelper.dispose();
+    this.viewHelpers.delete(scene);
+  }
+
+  private renderViewHelper(
+      scene: ModelScene, x: number, y: number, width: number, height: number) {
+    if (!scene.element.viewHelper) {
+      this.disposeViewHelper(scene);
+      return;
+    }
+
+    let viewHelper = this.viewHelpers.get(scene);
+    if (viewHelper == null) {
+      viewHelper = new ModelViewerViewHelper(scene.camera);
+      this.viewHelpers.set(scene, viewHelper);
+    }
+
+    viewHelper.render(this.threeRenderer, {
+      x,
+      y,
+      width,
+      height,
+      canvasWidth: this.canvas3D.width,
+      canvasHeight: this.canvas3D.height
+    });
+  }
+
   private copyPixels(scene: ModelScene, width: number, height: number) {
     const context2D = scene.context;
     if (context2D == null) {
@@ -494,14 +529,14 @@ export class Renderer extends
       }
 
       const {width, height} = this.sceneSize(scene);
+      const viewportY = Math.ceil(this.height * this.dpr) - height;
 
       scene.renderShadow(this.threeRenderer);
 
       // Need to set the render target in order to prevent
       // clearing the depth from a different buffer
       this.threeRenderer.setRenderTarget(null);
-      this.threeRenderer.setViewport(
-          0, Math.ceil(this.height * this.dpr) - height, width, height);
+      this.threeRenderer.setViewport(0, viewportY, width, height);
       if (scene.effectRenderer != null) {
         scene.effectRenderer.render(delta);
       } else {
@@ -510,6 +545,7 @@ export class Renderer extends
         this.threeRenderer.toneMapping = scene.toneMapping;
         this.threeRenderer.render(scene, scene.camera);
       }
+      this.renderViewHelper(scene, 0, viewportY, width, height);
       if (this.multipleScenesVisible ||
           (!scene.element.modelIsVisible && scene.renderCount === 0)) {
         this.copyPixels(scene, width, height);
@@ -538,6 +574,7 @@ export class Renderer extends
 
     const elements = [];
     for (const scene of this.scenes) {
+      this.disposeViewHelper(scene);
       elements.push(scene.element);
     }
 
