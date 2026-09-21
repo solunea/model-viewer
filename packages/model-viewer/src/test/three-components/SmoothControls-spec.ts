@@ -333,6 +333,38 @@ suite('SmoothControls', () => {
 
           expect(controls.getFieldOfView()).to.be.closeTo(20, 0.00001);
         });
+
+        test('can jump the orbit while preserving an interpolating FOV', () => {
+          controls.setFieldOfView(15);
+          const initialFov = controls.getFieldOfView();
+          controls.setOrbit(QUARTER_PI, HALF_PI, 2.5);
+
+          controls.jumpToGoal(true);
+
+          expect(controls.getCameraSpherical().theta)
+              .to.be.closeTo(QUARTER_PI, 0.00001);
+          expect(controls.getCameraSpherical().radius)
+              .to.be.closeTo(2.5, 0.00001);
+          expect(controls.getFieldOfView()).to.be.closeTo(initialFov, 0.00001);
+
+          controls.update(performance.now(), ONE_FRAME_DELTA);
+          expect(controls.getFieldOfView()).to.be.lessThan(initialFov);
+          expect(controls.getFieldOfView()).to.be.greaterThan(15);
+        });
+
+        test('clamps only a FOV that is outside new limits', () => {
+          controls.setFieldOfView(18);
+          settleControls(controls);
+          controls.setFieldOfView(16);
+          controls.applyOptions({minimumFieldOfView: 15, maximumFieldOfView: 17});
+
+          controls.clampFieldOfView();
+
+          expect(controls.getFieldOfView()).to.be.closeTo(17, 0.00001);
+          controls.update(performance.now(), ONE_FRAME_DELTA);
+          expect(controls.getFieldOfView()).to.be.lessThan(17);
+          expect(controls.getFieldOfView()).to.be.greaterThan(16);
+        });
       });
 
       suite('interaction', () => {

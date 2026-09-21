@@ -244,6 +244,9 @@ const $cancellationSource = Symbol('cancellationSource');
 
 const $lastSpherical = Symbol('lastSpherical');
 const $jumpCamera = Symbol('jumpCamera');
+const $preserveFieldOfView = Symbol('preserveFieldOfView');
+const $jumpCameraPreservingFieldOfView =
+    Symbol('jumpCameraPreservingFieldOfView');
 const $initialized = Symbol('initialized');
 const $maintainThetaPhi = Symbol('maintainThetaPhi');
 
@@ -428,6 +431,7 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     protected[$lastSpherical] = new Spherical();
     protected[$jumpCamera] = false;
+    protected[$preserveFieldOfView] = false;
     protected[$initialized] = false;
     protected[$maintainThetaPhi] = false;
     protected[$a11y] = {} as A11yTranslationsInterface;
@@ -476,6 +480,15 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
     }
 
     jumpCameraToGoal() {
+      this[$preserveFieldOfView] = false;
+      this[$jumpCamera] = true;
+      this.requestUpdate($jumpCamera, false);
+    }
+
+    protected[$jumpCameraPreservingFieldOfView]() {
+      if (!this[$jumpCamera]) {
+        this[$preserveFieldOfView] = true;
+      }
       this[$jumpCamera] = true;
       this.requestUpdate($jumpCamera, false);
     }
@@ -638,10 +651,11 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
 
       if (this[$jumpCamera] === true) {
         Promise.resolve().then(() => {
-          controls.jumpToGoal();
+          controls.jumpToGoal(this[$preserveFieldOfView]);
           scene.jumpToGoal();
           this[$onChange]();
           this[$jumpCamera] = false;
+          this[$preserveFieldOfView] = false;
         });
       }
     }
@@ -800,7 +814,7 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
         minimumRadius: this.skyboxOnly ? SKYBOX_ONLY_CAMERA_RADIUS : style[2]
       });
       if (!this.skyboxOnly) {
-        this.jumpCameraToGoal();
+        this[$jumpCameraPreservingFieldOfView]();
       }
     }
 
@@ -813,7 +827,7 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       this[$updateCameraForRadius](
           this.skyboxOnly ? SKYBOX_ONLY_CAMERA_RADIUS : style[2]);
       if (!this.skyboxOnly) {
-        this.jumpCameraToGoal();
+        this[$jumpCameraPreservingFieldOfView]();
       }
     }
 
@@ -823,7 +837,7 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
                SKYBOX_ONLY_MIN_FOV_DEG :
                style[0] * 180 / Math.PI});
       if (!this.skyboxOnly) {
-        this.jumpCameraToGoal();
+        this[$controls].clampFieldOfView();
       }
     }
 
@@ -833,7 +847,7 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
           this[$scene].adjustedFoV(style[0] * 180 / Math.PI);
       this[$controls].applyOptions({maximumFieldOfView: fov});
       if (!this.skyboxOnly) {
-        this.jumpCameraToGoal();
+        this[$controls].clampFieldOfView();
       }
     }
 

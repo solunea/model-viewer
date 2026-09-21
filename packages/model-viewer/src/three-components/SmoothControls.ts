@@ -897,8 +897,29 @@ export class SmoothControls extends EventDispatcher<{
    * Move the camera instantly instead of accelerating toward the goal
    * parameters.
    */
-  jumpToGoal() {
+  jumpToGoal(preserveFieldOfView: boolean = false) {
+    const logFov = this.logFov;
     this.update(0, SETTLING_TIME);
+
+    if (preserveFieldOfView) {
+      this.logFov = logFov;
+      this.moveCamera();
+    }
+  }
+
+  /**
+   * Clamp the current field of view to the configured limits without jumping
+   * to a different pending FOV goal.
+   */
+  clampFieldOfView() {
+    const {minimumFieldOfView, maximumFieldOfView} = this._options;
+    const clampedFov = clamp(
+        Math.exp(this.logFov), minimumFieldOfView!, maximumFieldOfView!);
+
+    if (clampedFov !== Math.exp(this.logFov)) {
+      this.logFov = Math.log(clampedFov);
+      this.moveCamera();
+    }
   }
 
   /**

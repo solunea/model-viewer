@@ -229,6 +229,22 @@ suite('Controls', () => {
       expect(element.getFieldOfView()).to.be.closeTo(nextFov, 0.00001);
     });
 
+    test('interpolates FOV when camera limits change at the same time',
+         async () => {
+           const initialFov = element.getFieldOfView();
+           const nextFov = initialFov - 5;
+           element.interpolationDecay = 1000;
+           element.minFieldOfView = '10deg';
+           element.maxFieldOfView = '40deg';
+           element.fieldOfView = `${nextFov}deg`;
+
+           await element.updateComplete;
+           await rafPasses();
+
+           expect(element.getFieldOfView()).to.be.lessThan(initialFov);
+           expect(element.getFieldOfView()).to.be.greaterThan(nextFov);
+         });
+
     test('skybox-only clamps FOV to panorama limits', async () => {
       element.skyboxOnly = true;
       await element.updateComplete;
