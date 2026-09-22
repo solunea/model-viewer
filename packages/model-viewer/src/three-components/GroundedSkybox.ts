@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import {BufferAttribute, Mesh, MeshBasicMaterial, SphereGeometry, Texture, Vector3} from 'three';
+import {BufferAttribute, ColorManagement, Mesh, MeshBasicMaterial, SphereGeometry, SRGBTransfer, Texture, Vector3} from 'three';
 
 export class GroundedSkybox extends Mesh {
   private height = 0;
@@ -30,7 +30,15 @@ export class GroundedSkybox extends Mesh {
   }
 
   set map(skybox: Texture|null) {
-    (this.material as MeshBasicMaterial).map = skybox;
+    const material = this.material as MeshBasicMaterial;
+    material.map = skybox;
+    // The grounded sphere must use the same color treatment as a skybox background.
+    const toneMapped = skybox == null ||
+        ColorManagement.getTransfer(skybox.colorSpace) !== SRGBTransfer;
+    if (material.toneMapped !== toneMapped) {
+      material.toneMapped = toneMapped;
+      material.needsUpdate = true;
+    }
   }
 
   isUsable() {

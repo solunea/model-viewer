@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import {AnimationAction, AnimationActionLoopStyles, AnimationClip, AnimationMixer, AnimationMixerEventMap, Box3, Camera, Euler, Event as ThreeEvent, Intersection, LoopOnce, LoopPingPong, LoopRepeat, Material, Matrix3, Matrix4, Mesh, MeshBasicMaterial, NeutralToneMapping, Object3D, PerspectiveCamera, Raycaster, Scene, ShaderMaterial, Sphere, SphereGeometry, Texture, ToneMapping, Triangle, Vector2, Vector3, WebGLRenderer, XRTargetRaySpace} from 'three';
+import {AnimationAction, AnimationActionLoopStyles, AnimationClip, AnimationMixer, AnimationMixerEventMap, Box3, Camera, ColorManagement, Euler, Event as ThreeEvent, Intersection, LoopOnce, LoopPingPong, LoopRepeat, Material, Matrix3, Matrix4, Mesh, MeshBasicMaterial, NeutralToneMapping, Object3D, PerspectiveCamera, Raycaster, Scene, ShaderMaterial, Sphere, SphereGeometry, SRGBTransfer, Texture, ToneMapping, Triangle, Vector2, Vector3, WebGLRenderer, XRTargetRaySpace} from 'three';
 import {CSS2DRenderer} from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {reduceVertices} from 'three/examples/jsm/utils/SceneUtils.js';
 
@@ -1101,6 +1101,10 @@ export class ModelScene extends Scene {
     const fadingIn = nextSkybox != null;
     this.setBackground(fadingIn ? previousSkybox : null);
     transition.material.map = fadingIn ? nextSkybox : previousSkybox;
+    // Match WebGLBackground: sRGB skyboxes bypass tone mapping, HDR ones do not.
+    transition.material.toneMapped = transition.material.map == null ||
+        ColorManagement.getTransfer(transition.material.map.colorSpace) !==
+            SRGBTransfer;
     this.skyboxTransitionOpacity = fadingIn ? 0 : 1;
     this.skyboxTransitionGoal = fadingIn ? 1 : 0;
     this.skyboxTransitionPending = nextSkybox;

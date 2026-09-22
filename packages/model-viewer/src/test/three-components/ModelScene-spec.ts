@@ -16,10 +16,11 @@
 import '../renderer-gate.js';
 
 import {expect} from 'chai';
-import {Matrix4, Mesh, SphereGeometry, Texture, Vector3} from 'three';
+import {LinearSRGBColorSpace, Matrix4, Mesh, MeshBasicMaterial, SphereGeometry, SRGBColorSpace, Texture, Vector3} from 'three';
 
 import {$scene} from '../../model-viewer-base.js';
 import {ModelViewerElement} from '../../model-viewer.js';
+import {GroundedSkybox} from '../../three-components/GroundedSkybox.js';
 import {ModelScene} from '../../three-components/ModelScene.js';
 import {assetPath} from '../helpers.js';
 
@@ -156,6 +157,39 @@ suite('ModelScene', () => {
 
       expect(transition.material.opacity).to.be.greaterThan(0);
       expect(transition.material.opacity).to.be.lessThan(1);
+    });
+
+    test('uses the same tone mapping as an sRGB skybox background', () => {
+      const firstSkybox = new Texture();
+      firstSkybox.colorSpace = SRGBColorSpace;
+      const secondSkybox = new Texture();
+      secondSkybox.colorSpace = SRGBColorSpace;
+
+      scene.setEnvironmentAndSkybox(null, firstSkybox);
+      scene.setSkyboxInterpolationDecay(200);
+      scene.setEnvironmentAndSkybox(null, secondSkybox);
+
+      const transition = (scene as any).skyboxTransition;
+      expect(transition.material.toneMapped).to.be.false;
+
+      const hdrSkybox = new Texture();
+      hdrSkybox.colorSpace = LinearSRGBColorSpace;
+      scene.setEnvironmentAndSkybox(null, hdrSkybox);
+      expect(transition.material.map).to.be.equal(hdrSkybox);
+      expect(transition.material.toneMapped).to.be.true;
+    });
+
+    test('uses the same tone mapping for a grounded skybox', () => {
+      const groundedSkybox = new GroundedSkybox();
+      const material = groundedSkybox.material as MeshBasicMaterial;
+      const skybox = new Texture();
+      skybox.colorSpace = SRGBColorSpace;
+      groundedSkybox.map = skybox;
+      expect(material.toneMapped).to.be.false;
+
+      skybox.colorSpace = LinearSRGBColorSpace;
+      groundedSkybox.map = skybox;
+      expect(material.toneMapped).to.be.true;
     });
 
     test('changes skybox immediately by default', () => {
