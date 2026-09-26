@@ -1,0 +1,5 @@
+commit 7fdb33495e6eb66944290d0d90bc21d215bfe9b3
+Author: jwan <jonathan.wanty@solunea.fr>
+Date:   Sat Sep 26 11:10:13 2026 +0200
+
+    Expose external input forwarding for framed overlays
