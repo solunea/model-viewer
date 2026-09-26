@@ -80,6 +80,68 @@ const cameraIsLookingAt = (camera: Camera, position: Vector3D) => {
 
 
 suite('Controls', () => {
+  suite('forwardInputEvent', () => {
+    let element: ModelViewerElement;
+    let frame: HTMLIFrameElement;
+
+    setup(() => {
+      element = new ModelViewerElement();
+      document.body.appendChild(element);
+      frame = document.createElement('iframe');
+      frame.style.width = '200px';
+      frame.style.height = '100px';
+      document.body.appendChild(frame);
+    });
+
+    teardown(() => {
+      element.remove();
+      frame.remove();
+    });
+
+    test('maps a child-frame pointer and forwards its identity', () => {
+      const input = element[$userInputElement];
+      const sourceWindow = frame.contentWindow!;
+      const SourcePointerEvent =
+          (sourceWindow as Window&typeof globalThis).PointerEvent;
+      const sourceEvent = new SourcePointerEvent('pointerdown', {
+        view: sourceWindow,
+        pointerId: 42,
+        pointerType: 'touch',
+        clientX: 25,
+        clientY: 30,
+        buttons: 1
+      });
+      let forwarded: PointerEvent|null = null;
+      input.addEventListener('pointerdown', (event) => {
+        forwarded = event;
+      }, {once: true});
+
+      expect(element.forwardInputEvent(sourceEvent)).to.be.true;
+      const rect = frame.getBoundingClientRect();
+      expect(forwarded).not.to.be.null;
+      expect(forwarded!.clientX)
+          .to.be.closeTo(rect.left + 25 * rect.width / sourceWindow.innerWidth, 1);
+      expect(forwarded!.clientY)
+          .to.be.closeTo(rect.top + 30 * rect.height / sourceWindow.innerHeight, 1);
+      expect(forwarded!.pointerId).to.equal(42);
+      expect(forwarded!.pointerType).to.equal('touch');
+      expect(forwarded!.buttons).to.equal(1);
+    });
+
+    test('forwards wheel details and rejects unsupported events', () => {
+      const input = element[$userInputElement];
+      let deltaY = 0;
+      input.addEventListener('wheel', (event) => {
+        deltaY = event.deltaY;
+      }, {once: true});
+
+      expect(element.forwardInputEvent(new WheelEvent('wheel', {deltaY: 75})))
+          .to.be.true;
+      expect(deltaY).to.equal(75);
+      expect(element.forwardInputEvent(new MouseEvent('dblclick'))).to.be.false;
+    });
+  });
+
   suite('camera-orbit', () => {
     let element: ModelViewerElement;
     let defaultRadius: number;

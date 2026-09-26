@@ -299,6 +299,9 @@ export declare interface ControlsInterface {
   zoom(keyPresses: number): void;
   interact(duration: number, finger0: Finger, finger1?: Finger): void;
   inputSensitivity: number;
+  forwardInputEvent(
+      sourceEvent: MouseEvent, type?: string,
+      overrides?: Partial<PointerEventInit&WheelEventInit>): boolean;
 }
 
 export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
@@ -508,6 +511,78 @@ export const ControlsMixin = <T extends Constructor<ModelViewerElementBase>>(
       }
       const event = new WheelEvent('wheel', {deltaY: -30 * keyPresses});
       this[$userInputElement].dispatchEvent(event);
+    }
+
+    /**
+     * Forwards input from an overlay, including one in a same-origin child frame.
+     * The caller owns the overlay and decides which gestures to forward.
+     */
+    forwardInputEvent(
+        sourceEvent: MouseEvent, type: string = sourceEvent.type,
+        overrides: Partial<PointerEventInit&WheelEventInit> = {}): boolean {
+      const pointer = type.startsWith('pointer');
+      const wheel = type === 'wheel';
+      if (!pointer && !wheel && ![
+            'mousedown', 'mousemove', 'mouseup', 'click', 'contextmenu'
+          ].includes(type)) {
+        return false;
+      }
+
+      const targetWindow = this.ownerDocument.defaultView;
+      if (targetWindow == null) return false;
+      let sourceWindow = sourceEvent.view ||
+          (sourceEvent.target as Node | null)?.ownerDocument?.defaultView ||
+          targetWindow;
+      let clientX = sourceEvent.clientX;
+      let clientY = sourceEvent.clientY;
+      try {
+        while (sourceWindow !== targetWindow) {
+          const frame = sourceWindow.frameElement as HTMLElement | null;
+          if (frame == null) return false;
+          const rect = frame.getBoundingClientRect();
+          clientX = rect.left + clientX * rect.width / sourceWindow.innerWidth;
+          clientY = rect.top + clientY * rect.height / sourceWindow.innerHeight;
+          sourceWindow = frame.ownerDocument.defaultView!;
+        }
+      } catch {
+        return false;
+      }
+
+      const init: PointerEventInit&WheelEventInit = {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: targetWindow,
+        clientX,
+        clientY,
+        screenX: sourceEvent.screenX,
+        screenY: sourceEvent.screenY,
+        button: sourceEvent.button,
+        buttons: sourceEvent.buttons,
+        ctrlKey: sourceEvent.ctrlKey,
+        shiftKey: sourceEvent.shiftKey,
+        altKey: sourceEvent.altKey,
+        metaKey: sourceEvent.metaKey,
+        ...overrides
+      };
+      if (pointer) {
+        const sourcePointer = sourceEvent as PointerEvent;
+        init.pointerId = sourcePointer.pointerId || 1;
+        init.pointerType = sourcePointer.pointerType || 'mouse';
+        init.isPrimary = sourcePointer.isPrimary !== false;
+        init.pressure = sourcePointer.pressure;
+      }
+      if (wheel) {
+        const sourceWheel = sourceEvent as WheelEvent;
+        init.deltaX = sourceWheel.deltaX;
+        init.deltaY = sourceWheel.deltaY;
+        init.deltaZ = sourceWheel.deltaZ;
+        init.deltaMode = sourceWheel.deltaMode;
+      }
+
+      const event = wheel ? new WheelEvent(type, init) :
+          pointer ? new PointerEvent(type, init) : new MouseEvent(type, init);
+      return this[$userInputElement].dispatchEvent(event);
     }
 
     connectedCallback() {
