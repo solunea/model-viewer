@@ -14,7 +14,7 @@
  */
 
 import type {Camera, WebGLRenderer} from 'three';
-import {Spherical} from 'three';
+import {Object3D, Spherical, Vector4} from 'three';
 import {ViewHelper} from 'three/examples/jsm/helpers/ViewHelper.js';
 
 const VIEW_HELPER_SIZE = 128;
@@ -45,7 +45,7 @@ interface ViewHelperDomElement {
  * Adapts Three.js ViewHelper to model-viewer's shared renderer viewport model.
  */
 export class ModelViewerViewHelper {
-  private viewport: ViewHelperViewport|null = null;
+  private viewport: Omit<ViewHelperViewport, 'renderedDpr'>|null = null;
 
   private readonly domElement: ViewHelperDomElement = {
     offsetWidth: 1,
@@ -56,6 +56,7 @@ export class ModelViewerViewHelper {
   };
 
   private readonly viewHelper: ViewHelper;
+  private readonly rendererViewport = new Vector4();
 
   constructor(private readonly camera: Camera) {
     this.viewHelper =
@@ -63,8 +64,16 @@ export class ModelViewerViewHelper {
   }
 
   render(renderer: WebGLRenderer, viewport: ViewHelperViewport) {
-    this.viewport = viewport;
-    const {canvasWidth, canvasHeight, x, y, width, height} = viewport;
+    const {renderedDpr} = viewport;
+    this.viewport = {
+      x: viewport.x / renderedDpr,
+      y: viewport.y / renderedDpr,
+      width: viewport.width / renderedDpr,
+      height: viewport.height / renderedDpr,
+      canvasWidth: viewport.canvasWidth / renderedDpr,
+      canvasHeight: viewport.canvasHeight / renderedDpr
+    };
+    const {canvasWidth, canvasHeight, x, y, width, height} = this.viewport;
     if (width < VIEW_HELPER_SIZE || height < VIEW_HELPER_SIZE) {
       return;
     }
@@ -73,16 +82,33 @@ export class ModelViewerViewHelper {
     this.domElement.offsetHeight = canvasHeight;
 
     this.viewHelper.location.left = null;
-    this.viewHelper.location.top = Math.max(
-        0, canvasHeight - y - height);
+    this.viewHelper.location.top = Math.max(0, canvasHeight - y - height);
     this.viewHelper.location.right = Math.max(0, canvasWidth - x - width);
     this.viewHelper.location.bottom = 0;
 
     const autoClear = renderer.autoClear;
+    renderer.getViewport(this.rendererViewport);
     renderer.autoClear = false;
     try {
-      this.viewHelper.render(renderer);
+      this.viewHelper.render({
+        clearDepth: () => renderer.clearDepth(),
+        getViewport: (target: Vector4) =>
+            renderer.getViewport(target).divideScalar(renderedDpr),
+        setViewport: (x: number, y: number, width: number, height: number) =>
+            renderer.setViewport(
+                x * renderedDpr,
+                y * renderedDpr,
+                width * renderedDpr,
+                height * renderedDpr),
+        render: (scene: Object3D, camera: Camera) =>
+            renderer.render(scene, camera)
+      } as unknown as WebGLRenderer);
     } finally {
+      renderer.setViewport(
+          this.rendererViewport.x,
+          this.rendererViewport.y,
+          this.rendererViewport.z,
+          this.rendererViewport.w);
       renderer.autoClear = autoClear;
     }
   }
@@ -103,8 +129,7 @@ export class ModelViewerViewHelper {
         pointer.clientY >= helperTop && pointer.clientY <= helperBottom;
   }
 
-  handleClick(event: PointerEvent, elementRect: DOMRect):
-      ViewHelperOrbit|null {
+  handleClick(event: PointerEvent, elementRect: DOMRect): ViewHelperOrbit|null {
     const pointer = this.eventToRendererPoint(event, elementRect);
     if (pointer == null) {
       return null;
@@ -139,11 +164,11 @@ export class ModelViewerViewHelper {
       return null;
     }
 
-    const {x, y, height, canvasHeight, renderedDpr} = viewport;
+    const {x, y, height, canvasHeight} = viewport;
     const sceneTop = canvasHeight - y - height;
     return {
-      clientX: x + (event.clientX - elementRect.left) * renderedDpr,
-      clientY: sceneTop + (event.clientY - elementRect.top) * renderedDpr
+      clientX: x + event.clientX - elementRect.left,
+      clientY: sceneTop + event.clientY - elementRect.top
     };
   }
 }
