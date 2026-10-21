@@ -1,5 +1,5 @@
 import {expect} from 'chai';
-import {Mesh, Raycaster, ShaderMaterial, SphereGeometry, Vector2, Vector3} from 'three';
+import {Color, Mesh, Raycaster, ShaderMaterial, SphereGeometry, Vector2, Vector3} from 'three';
 
 import {$scene} from '../../model-viewer-base.js';
 import {ModelViewerElement} from '../../model-viewer.js';
@@ -109,6 +109,16 @@ suite('PanoramaAreas geometry and lifecycle', () => {
         areas.setAreas([shape]);
         expect(areas.fromPoint(...point(16.5 / 64, 16.5 / 32))).to.equal(null);
       });
+  test('changes highlight color without recreating the mask texture', () => {
+    areas.setAreas([definition()]);
+    areas.setHighlight('area', '#ff0000');
+    const mesh = areas.children[0] as Mesh<SphereGeometry, ShaderMaterial>;
+    const texture = mesh.material.uniforms.mask.value;
+    expect(mesh.material.uniforms.highlightColor.value.equals(new Color('#ff0000'))).to.equal(true);
+    areas.setHighlight('area', 'rgb(0, 255, 0)');
+    expect(mesh.material.uniforms.highlightColor.value.equals(new Color('#00ff00'))).to.equal(true);
+    expect(mesh.material.uniforms.mask.value).to.equal(texture);
+  });
   test('handles seam, poles and CSS window coordinates after resize', () => {
     areas.setAreas([definition(
         'edges', (x, y) => x === 0 || x === 63 || y === 0 || y === 31)]);

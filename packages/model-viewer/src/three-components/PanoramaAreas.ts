@@ -1,6 +1,6 @@
 /* @license Copyright 2026 Solunea. Licensed under the Apache License,
  * Version 2.0. */
-import {BackSide, DataTexture, Group, Mesh, NearestFilter, Raycaster, RedFormat, ShaderMaterial, Sphere, SphereGeometry, Vector2, Vector3, Vector4} from 'three';
+import {BackSide, Color, DataTexture, Group, Mesh, NearestFilter, Raycaster, RedFormat, ShaderMaterial, Sphere, SphereGeometry, Vector2, Vector3, Vector4} from 'three';
 
 import {ModelScene} from './ModelScene.js';
 
@@ -61,6 +61,7 @@ export class PanoramaAreas extends Group {
   private uploaded: PanoramaAreaDefinition|null = null;
   private active = false;
   private capturing = false;
+  private highlightColor = new Color('#8061e6');
 
   constructor(private scene: ModelScene, private textureLimit = 4096) {
     super();
@@ -91,12 +92,16 @@ export class PanoramaAreas extends Group {
     this.update();
   }
 
-  setHighlight(name: string|null) {
-    if (name === this.highlighted) {
+  setHighlight(name: string|null, color?: string) {
+    const nextColor = color ? new Color(color) : this.highlightColor;
+    const colorChanged = !this.highlightColor.equals(nextColor);
+    if (name === this.highlighted && !colorChanged) {
       return;
     }
+    this.highlightColor.copy(nextColor);
     this.highlighted = name;
     this.update();
+    if (colorChanged && this.visible) this.scene.queueRender();
   }
 
   setActive(active: boolean) {
@@ -177,19 +182,22 @@ export class PanoramaAreas extends Group {
           toneMapped: false,
           uniforms: {
             mask: {value: null},
+            highlightColor: {value: this.highlightColor},
             panorama: {value: new Vector2()},
             bounds: {value: new Vector4()}
           },
           vertexShader: `varying vec3 direction;
             void main(){direction=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
           fragmentShader: `precision highp float;
-            uniform sampler2D mask;uniform vec2 panorama;uniform vec4 bounds;varying vec3 direction;
+            uniform sampler2D mask;uniform vec2 panorama;uniform vec4 bounds;uniform vec3 highlightColor;varying vec3 direction;
             void main(){vec3 d=normalize(direction);
               vec2 uv=vec2(fract(.25+atan(d.x,-d.z)/6.28318530718),.5-asin(clamp(d.y,-1.,1.))/3.14159265359);
               vec2 p=min(floor(uv*panorama),panorama-1.)-bounds.xy;
               if(p.x<0.||p.y<0.||p.x>=bounds.z||p.y>=bounds.w)discard;
               float alpha=texture2D(mask,(p+.5)/bounds.zw).r;
-              if(alpha<.5)discard;gl_FragColor=vec4(.5,.38,.9,.3);}`
+              if(alpha<.5)discard;gl_FragColor=vec4(highlightColor,.3);
+              #include <colorspace_fragment>
+            }`
         });
         this.mesh = new Mesh(new SphereGeometry(radius, 64, 32), material);
         this.mesh.name = 'PanoramaAreaHighlight';

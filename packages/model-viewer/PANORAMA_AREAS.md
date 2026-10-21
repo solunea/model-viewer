@@ -11,6 +11,7 @@ import type {PanoramaAreaDefinition} from '@solunea/model-viewer';
 
 viewer.setPanoramaAreas(areas); // Replaces the ordered collection; [] clears it.
 viewer.setPanoramaAreaHighlight('hotspot-rock'); // null clears the highlight.
+viewer.setPanoramaAreaHighlight('hotspot-rock', '#ff6600'); // Optional CSS color.
 const hit = viewer.panoramaAreaFromPoint(event.clientX, event.clientY);
 // hit: {name, u, v} | null. Coordinates are CSS window coordinates.
 ```
@@ -56,6 +57,9 @@ Clearing the highlight retains at most its last texture for fast hover re-entry.
 Definitions and highlight intent survive reconnection; GPU resources are rebuilt.
 Ordinary raycasts, model bounds, shadows and `exportScene()` exclude the overlay.
 Updates dirty the native scene; areas do not start an animation loop.
+Changing the highlight color updates a uniform without reallocating its mask
+texture. The application can pass its computed theme color, including an
+inherited CSS custom property, without storing styling in each area definition.
 
 `toBlob()` excludes areas, redraws before copying the image, then restores the
 latest highlight even when encoding fails. Concurrent captures of the same
