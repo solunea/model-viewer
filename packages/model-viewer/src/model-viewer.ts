@@ -21,6 +21,7 @@ import {ARMixin} from './features/ar.js';
 import {ControlsMixin} from './features/controls.js';
 import {EnvironmentMixin} from './features/environment.js';
 import {LoadingMixin} from './features/loading.js';
+import {PanoramaAreasMixin} from './features/panorama-areas.js';
 import {SceneGraphMixin} from './features/scene-graph.js';
 import {StagingMixin} from './features/staging.js';
 import ModelViewerElementBase from './model-viewer-base.js';
@@ -29,11 +30,12 @@ import ModelViewerElementBase from './model-viewer-base.js';
 // Requires an import map - "three": "path/to/model-viewer.min.js".
 export {CanvasTexture, FileLoader, Loader, NearestFilter} from 'three';
 
-export const ModelViewerElement =
+export const ModelViewerElement = PanoramaAreasMixin(
     AnnotationMixin(SceneGraphMixin(StagingMixin(EnvironmentMixin(ControlsMixin(
-        ARMixin(LoadingMixin(AnimationMixin(ModelViewerElementBase))))))));
+        ARMixin(LoadingMixin(AnimationMixin(ModelViewerElementBase)))))))));
 
 export type ModelViewerElement = InstanceType<typeof ModelViewerElement>;
+export type{PanoramaAreaDefinition, PanoramaAreaHit} from './features/panorama-areas.js';
 
 export type{RGB, RGBA} from './three-components/gltf-instance/gltf-2.0';
 

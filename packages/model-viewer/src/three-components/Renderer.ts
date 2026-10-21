@@ -484,7 +484,7 @@ export class Renderer extends
         (compensateExposure ? COMMERCE_EXPOSURE : 1.0);
   }
 
-  render(t: number, frame?: XRFrame) {
+  render(t: number, frame?: XRFrame, forceScene?: ModelScene) {
     if (frame != null) {
       if (this.arRenderer != null) {
         this.arRenderer.onWebXRFrame(t, frame);
@@ -511,7 +511,7 @@ export class Renderer extends
     for (const scene of this.orderedScenes()) {
       const {element} = scene;
       if (!element.loaded ||
-          (!element.modelIsVisible && scene.renderCount > 0)) {
+          (!element.modelIsVisible && scene.renderCount > 0 && scene !== forceScene)) {
         continue;
       }
 
@@ -568,7 +568,7 @@ export class Renderer extends
       }
       this.renderViewHelper(scene, 0, viewportY, width, height);
       if (this.multipleScenesVisible ||
-          (!scene.element.modelIsVisible && scene.renderCount === 0)) {
+          (!scene.element.modelIsVisible && (scene.renderCount === 0 || scene === forceScene))) {
         this.copyPixels(scene, width, height);
       } else if (canvas3D.parentElement !== scene.canvas.parentElement) {
         scene.canvas.parentElement!.appendChild(canvas3D);

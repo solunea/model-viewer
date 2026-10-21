@@ -23,6 +23,9 @@ supported to provide a seamless development experience.
 
 ### Solunea fork 4.4.0
 
+The fork also includes [native Panorama Areas](PANORAMA_AREAS.md): compact binary
+masks, precise hit detection and a single highlight inside the native renderer.
+
 `@solunea/model-viewer` incorporates the runtime updates from Google's
 [v4.4.0 release](https://github.com/google/model-viewer/releases/tag/v4.4.0)
 (`adc877c6`), including the fixes released since v4.3.0.
