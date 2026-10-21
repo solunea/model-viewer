@@ -21,6 +21,32 @@ supported to provide a seamless development experience.
 
 ## Installing
 
+### Solunea fork 4.4.0
+
+`@solunea/model-viewer` incorporates the runtime updates from Google's
+[v4.4.0 release](https://github.com/google/model-viewer/releases/tag/v4.4.0)
+(`adc877c6`), including the fixes released since v4.3.0.
+
+- Extra models support `m`, `cm` and `mm` offsets, orientation changes and removal.
+- Animation completion events and playback repetitions survive model changes.
+- Quick Look supports third-party iOS browsers, wall placement and recovery after
+  USDZ export failures.
+- Failed environment and skybox loads can be retried, including Solunea's custom
+  cache keys. Focused hotspots remain visible.
+- CSS hex colors and non-finite camera angles receive the upstream fixes.
+
+Solunea's skybox transitions, depth of field, shadow controls, automatic extra-model
+placement, view helper and external input forwarding are retained. Three.js stays
+on the existing `^0.183.0` dependency range.
+
+Build the custom package from the repository root:
+
+```sh
+npm run build --workspace=@solunea/model-viewer
+```
+
+This regenerates the standalone and external-Three.js bundles under `dist/`.
+
 ### NPM
 
 The `<model-viewer>` web component can be installed from [NPM](https://npmjs.org):

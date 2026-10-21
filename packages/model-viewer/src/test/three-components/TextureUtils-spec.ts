@@ -157,6 +157,32 @@ suite('TextureUtils', () => {
       expect(environment.mapping).to.be.eq(EquirectangularReflectionMapping);
     });
 
+    test('retries a url whose earlier load failed', async () => {
+      const realLoadEquirect = textureUtils.loadEquirect.bind(textureUtils);
+      let calls = 0;
+      textureUtils.loadEquirect = async (url: string) => {
+        calls++;
+        if (calls === 1) {
+          throw new Error('network error');
+        }
+        return realLoadEquirect(url);
+      };
+
+      let failed = false;
+      try {
+        await textureUtils.generateEnvironmentMapAndSkybox(EQUI_URL);
+      } catch (e) {
+        failed = true;
+      }
+      expect(failed).to.be.eq(true);
+
+      const textures =
+          await textureUtils.generateEnvironmentMapAndSkybox(EQUI_URL);
+
+      expect(textures.environmentMap.name).to.be.eq(EQUI_URL);
+      expect(textures.skybox!.name).to.be.eq(EQUI_URL);
+    });
+
     test(
         'returns an environmentMap and skybox texture from an HDR url',
         async () => {
@@ -204,7 +230,7 @@ suite('TextureUtils', () => {
           let loadCount = 0;
           let disposeCount = 0;
 
-          textureUtilsAny.loadEquirect = async (url: string) => {
+          textureUtilsAny.loadTransientEquirect = async (url: string) => {
             loadCount++;
             return {
               isTexture: true,
@@ -227,6 +253,37 @@ suite('TextureUtils', () => {
           expect(disposeCount).to.be.eq(1);
           expect(textureUtilsAny.skyboxCache.size).to.be.eq(1);
         });
+
+    test('retries a failed transient skybox with a custom cache key', async () => {
+      const textureUtilsAny = textureUtils as any;
+      let attempts = 0;
+      textureUtilsAny.loadTransientEquirect = async (url: string) => {
+        attempts++;
+        if (attempts === 1) {
+          throw new Error('network error');
+        }
+        const texture = new (await import('three')).Texture();
+        texture.name = url;
+        return texture;
+      };
+
+      try {
+        await textureUtils.generateEnvironmentMapAndSkybox(
+            'blob:retry', null, () => {}, false, 'panorama');
+        expect.fail('The first load should fail');
+      } catch (error) {
+        expect((error as Error).message).to.equal('network error');
+      }
+
+      expect(textureUtilsAny.skyboxCache.size).to.equal(0);
+      expect(textureUtilsAny.skyboxCacheUrls.size).to.equal(0);
+
+      const textures = await textureUtils.generateEnvironmentMapAndSkybox(
+          'blob:retry', null, () => {}, false, 'panorama');
+      expect(textures.skybox!.name).to.equal('blob:retry');
+      expect(attempts).to.equal(2);
+      expect(textureUtilsAny.skyboxCache.size).to.equal(1);
+    });
 
     test('throws if given an invalid url', async () => {
       try {

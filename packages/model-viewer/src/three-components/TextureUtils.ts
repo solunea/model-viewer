@@ -202,12 +202,15 @@ export default class TextureUtils {
                       texture = dataTexture;
                       disposeGainMapQuadRenderer(result, true);
                     } else {
-                      console.warn('Decoded DataTexture is completely black, falling back to render target texture.');
+                      console.warn(
+                          'Decoded DataTexture is completely black, falling back to render target texture.');
                       texture = renderTarget.texture;
                       disposeGainMapQuadRenderer(result, false);
                     }
                   } catch (e) {
-                    console.warn('Failed to convert gainmap to DataTexture, falling back to render target texture:', e);
+                    console.warn(
+                        'Failed to convert gainmap to DataTexture, falling back to render target texture:',
+                        e);
                     texture = renderTarget.texture;
                     disposeGainMapQuadRenderer(result, false);
                   }
@@ -339,6 +342,12 @@ export default class TextureUtils {
 
       this.skyboxCacheUrls.set(resolvedCacheKey, url);
       this.skyboxCache.set(resolvedCacheKey, skyboxMapLoads);
+      skyboxMapLoads.catch(() => {
+        if (this.skyboxCache.get(resolvedCacheKey) === skyboxMapLoads) {
+          this.skyboxCache.delete(resolvedCacheKey);
+          this.skyboxCacheUrls.delete(resolvedCacheKey);
+        }
+      });
     }
 
     return this.skyboxCache.get(resolvedCacheKey)!;

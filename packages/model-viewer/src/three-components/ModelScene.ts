@@ -155,6 +155,12 @@ export class ModelScene extends Scene {
   private boundsAndShadowDirty = false;
   private mixers: AnimationMixer[] = [];
   private mixerPausedStates: boolean[] = [];
+  // Mixer event subscriptions are kept so they can be re-applied to the mixers
+  // that are recreated on every setSource() (one per loaded glTF).
+  private mixerEventSubscriptions: Array<{
+    event: keyof AnimationMixerEventMap,
+    callback: (...args: any[]) => void
+  }> = [];
   private cancelPendingSourceChange: (() => void)|null = null;
   private animationsByName: Map<string, AnimationClip> = new Map();
   private currentAnimationActions: (AnimationAction|null)[] = [];
@@ -316,11 +322,11 @@ export class ModelScene extends Scene {
       if (gltf != null) {
         this._models.push(gltf.scene);
         this.target.add(gltf.scene);
-        this.mixers.push(new AnimationMixer(gltf.scene));
+        this.mixers.push(this.createMixer(gltf.scene));
         this.mixerPausedStates.push(false);
         this.currentAnimationActions.push(null);
       } else {
-        this.mixers.push(new AnimationMixer(this.target));
+        this.mixers.push(this.createMixer(this.target));
         this.mixerPausedStates.push(false);
         this.currentAnimationActions.push(null);
       }
@@ -424,7 +430,7 @@ export class ModelScene extends Scene {
   }
 
   updateModelTransforms(
-      index: number, offset?: string|null, _orientation?: string|null,
+      index: number, offset?: string|null, orientation?: string|null,
       scale?: string|null, autoOffset = false) {
     const model = this._models[index];
     if (!model)
@@ -432,13 +438,25 @@ export class ModelScene extends Scene {
 
     let offsetY = 0;
     if (offset) {
-      const parts = offset.split(' ')
-                        .map(s => s.trim())
-                        .filter(s => s.length > 0)
-                        .map(Number);
-      if (parts.length === 3 && !parts.some(isNaN)) {
-        model.position.set(parts[0], parts[1], parts[2]);
-        offsetY = parts[1];
+      const terms = parseExpressions(offset)[0]
+                        .terms as [NumberNode, NumberNode, NumberNode];
+      if (terms.length >= 3) {
+        const x = normalizeUnit(terms[0]).number;
+        const y = normalizeUnit(terms[1]).number;
+        const z = normalizeUnit(terms[2]).number;
+        model.position.set(x, y, z);
+        offsetY = y;
+      }
+    }
+
+    if (orientation) {
+      const terms = parseExpressions(orientation)[0]
+                        .terms as [NumberNode, NumberNode, NumberNode];
+      if (terms.length >= 3) {
+        const roll = normalizeUnit(terms[0]).number;
+        const pitch = normalizeUnit(terms[1]).number;
+        const yaw = normalizeUnit(terms[2]).number;
+        model.quaternion.setFromEuler(new Euler(pitch, yaw, roll, 'YXZ'));
       }
     }
 
@@ -488,6 +506,7 @@ export class ModelScene extends Scene {
 
   reset() {
     this.url = null;
+    this.extraUrls = [];
     this.renderCount = 0;
     this.queueRender();
     this.clearSkyboxTransition();
@@ -1442,13 +1461,17 @@ export class ModelScene extends Scene {
         }
         repetitionCount = Math.max(parseInt(repetitionCount), 1);
       }
-    } else if (typeof repetitionCount === 'number' && repetitionCount < 1) {
-      repetitionCount = 1;
-      console.warn(`Invalid repetitionCount value: ${
-          repetitionCount}. Using  1 value as minimum.`);
+    } else if (typeof repetitionCount === 'number' && !isNaN(repetitionCount)) {
+      // A valid number >= 1 (including Infinity) is left untouched.
+      if (repetitionCount < 1) {
+        console.warn(`Invalid repetitionCount value: ${
+            repetitionCount}. Using 1 as minimum.`);
+        repetitionCount = 1;
+      }
     } else {
       console.warn(`Invalid repetitionCount value: ${
           repetitionCount}. Using default: Infinity`);
+      repetitionCount = Infinity;
     }
 
     if (repetitionCount === 1 && loopMode !== LoopOnce) {
@@ -1734,9 +1757,23 @@ export class ModelScene extends Scene {
 
   subscribeMixerEvent(
       event: keyof AnimationMixerEventMap, callback: (...args: any[]) => void) {
+    // Remember the subscription so it survives the mixers being recreated on
+    // the next setSource(), then apply it to the mixers that already exist.
+    this.mixerEventSubscriptions.push({event, callback});
     for (const mixer of this.mixers) {
       mixer.addEventListener(event, callback);
     }
+  }
+
+  // Creates an AnimationMixer with the currently subscribed events already
+  // attached, so events (e.g. 'finished', 'loop') keep firing after a new
+  // model is loaded.
+  private createMixer(root: Object3D): AnimationMixer {
+    const mixer = new AnimationMixer(root);
+    for (const {event, callback} of this.mixerEventSubscriptions) {
+      mixer.addEventListener(event, callback);
+    }
+    return mixer;
   }
 
   /**

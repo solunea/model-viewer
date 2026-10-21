@@ -17,7 +17,7 @@ import {property} from 'lit/decorators.js';
 import {Object3D} from 'three';
 import {USDZExporter} from 'three/examples/jsm/exporters/USDZExporter.js';
 
-import {IS_AR_QUICKLOOK_CANDIDATE, IS_IOS_GSA, IS_IOS_THIRDPARTY, IS_SCENEVIEWER_CANDIDATE, IS_WEBXR_AR_CANDIDATE} from '../constants.js';
+import {IS_AR_QUICKLOOK_CANDIDATE, IS_IOS_GSA, IS_SCENEVIEWER_CANDIDATE, IS_WEBXR_AR_CANDIDATE} from '../constants.js';
 import ModelViewerElementBase, {$needsRender, $progressTracker, $renderer, $scene, $shouldAttemptPreload, $updateSource} from '../model-viewer-base.js';
 import {enumerationDeserializer} from '../styles/deserializers.js';
 import {ARStatus, ARTracking} from '../three-components/ARRenderer.js';
@@ -244,7 +244,7 @@ configuration or device capabilities');
               break;
             }
             if (value === 'quick-look' && IS_AR_QUICKLOOK_CANDIDATE &&
-                !IS_IOS_GSA && (!IS_IOS_THIRDPARTY || this.iosSrc != null)) {
+                !IS_IOS_GSA) {
               arMode = ARMode.QUICK_LOOK;
               break;
             }
@@ -278,8 +278,6 @@ configuration or device capabilities');
     }
 
     protected async[$enterARWithWebXR]() {
-      console.log('Attempting to present in AR with WebXR...');
-
       await this[$triggerLoad]();
 
       try {
@@ -395,7 +393,6 @@ configuration or device capabilities');
       self.addEventListener('hashchange', undoHashChange, {once: true});
 
       this[$arAnchor].setAttribute('href', intent);
-      console.log('Attempting to present in AR with Scene Viewer...');
       this[$arAnchor].click();
     }
 
@@ -408,7 +405,13 @@ configuration or device capabilities');
 
       this[$arButtonContainer].classList.remove('enabled');
 
-      const objectURL = generateUsdz ? await this.prepareUSDZ() : this.iosSrc!;
+      let objectURL: string;
+      try {
+        objectURL = generateUsdz ? await this.prepareUSDZ() : this.iosSrc!;
+      } catch (error) {
+        this[$arButtonContainer].classList.add('enabled');
+        throw error;
+      }
       const modelUrl = new URL(objectURL, self.location.toString());
 
       if (generateUsdz) {
@@ -450,7 +453,6 @@ configuration or device capabilities');
       if (!anchor.isConnected)
         this.shadowRoot!.appendChild(anchor);
 
-      console.log('Attempting to present in AR with Quick Look...');
       anchor.click();
       anchor.removeChild(img);
       if (generateUsdz) {
@@ -480,6 +482,10 @@ configuration or device capabilities');
 
       updateSourceProgress(0.2);
 
+      const usdzOptions = this.arPlacement === 'wall' ?
+          {includeAnchoringProperties: false} :
+          {};
+
       const exporter = new USDZExporter();
 
       const exportGroup = new Object3D();
@@ -491,15 +497,23 @@ configuration or device capabilities');
       }
       exportGroup.updateWorldMatrix(false, true);
 
-      const arraybuffer = await exporter.parseAsync(exportGroup, {
-        maxTextureSize: isNaN(this.arUsdzMaxTextureSize as any) ?
-            Infinity :
-            Math.max(parseInt(this.arUsdzMaxTextureSize), 16),
-      });
-
-      for (const m of models) {
-        exportGroup.remove(m);
-        target.add(m);
+      let arraybuffer: ArrayBuffer;
+      try {
+        arraybuffer = await exporter.parseAsync(exportGroup, {
+          ...usdzOptions,
+          maxTextureSize: isNaN(this.arUsdzMaxTextureSize as any) ?
+              Infinity :
+              Math.max(parseInt(this.arUsdzMaxTextureSize), 16),
+        });
+      } finally {
+        for (const m of models) {
+          exportGroup.remove(m);
+          target.add(m);
+        }
+        if (shadow != null) {
+          shadow.visible = visible;
+        }
+        updateSourceProgress(1);
       }
 
       const blob = new Blob([arraybuffer], {
@@ -507,12 +521,6 @@ configuration or device capabilities');
       });
 
       const url = URL.createObjectURL(blob);
-
-      updateSourceProgress(1);
-
-      if (shadow != null) {
-        shadow.visible = visible;
-      }
 
       return url;
     }

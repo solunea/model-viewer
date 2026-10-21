@@ -57,6 +57,45 @@ suite('ExtraModel', () => {
       expect(scene._models.length).to.equal(2);
     });
 
+    test('removes extra-model and updates the scene', async () => {
+      element.loading = 'eager';
+      element.src = CUBE_GLB_PATH;
+
+      const extra = document.createElement('extra-model');
+      extra.setAttribute('src', CUBE_GLB_PATH);
+      element.appendChild(extra);
+
+      await waitForEvent(element, 'load');
+
+      const scene = (element as any)[$scene];
+      expect(scene._models.length).to.equal(2);
+
+      const loadEvent = waitForEvent(element, 'load');
+      element.removeChild(extra);
+      await loadEvent;
+
+      expect(scene._models.length).to.equal(1);
+    });
+
+    test('removes all extra-models when src is null', async () => {
+      element.loading = 'eager';
+
+      const extra = document.createElement('extra-model');
+      extra.setAttribute('src', CUBE_GLB_PATH);
+      element.appendChild(extra);
+
+      await waitForEvent(element, 'load');
+
+      const scene = (element as any)[$scene];
+      expect(scene._models.length).to.equal(1);
+
+      element.removeChild(extra);
+      await timePasses();
+
+      expect(scene._models.length).to.equal(0);
+      expect(scene.extraUrls.length).to.equal(0);
+    });
+
     test('updates position dynamically when offset changes', async () => {
       element.loading = 'eager';
       element.src = CUBE_GLB_PATH;
@@ -77,6 +116,86 @@ suite('ExtraModel', () => {
 
       expect(scene._models[1].position.x).to.equal(5);
     });
+
+    test('preserves automatic placement with length units and orientation', async () => {
+      element.loading = 'eager';
+      element.src = CUBE_GLB_PATH;
+
+      const extra = document.createElement('extra-model');
+      extra.setAttribute('src', CUBE_GLB_PATH);
+      extra.setAttribute('offset', '0cm 25cm 0mm');
+      extra.setAttribute('orientation', '0deg 0deg 90deg');
+      extra.setAttribute('data-auto-offset', '');
+      element.appendChild(extra);
+
+      await waitForEvent(element, 'load');
+
+      const scene = element[$scene];
+      const primaryBounds = (scene as any).getModelBounds(0);
+      const extraBounds = (scene as any).getModelBounds(1);
+      expect(extraBounds.min.x).to.be.greaterThan(primaryBounds.max.x);
+      expect(extraBounds.min.y).to.be.closeTo(primaryBounds.min.y + 0.25, 0.001);
+      expect(scene.models[1].quaternion.y)
+          .to.be.closeTo(Math.sin(Math.PI / 4), 0.001);
+
+      extra.setAttribute('offset', 'auto');
+      await timePasses();
+
+      const autoBounds = (scene as any).getModelBounds(1);
+      expect(autoBounds.min.x).to.be.greaterThan(primaryBounds.max.x);
+      expect(autoBounds.min.y).to.be.closeTo(primaryBounds.min.y, 0.001);
+    });
+
+    test('normalizes offset lengths with units to meters', async () => {
+      element.loading = 'eager';
+      element.src = CUBE_GLB_PATH;
+
+      const extra = document.createElement('extra-model');
+      extra.setAttribute('src', CUBE_GLB_PATH);
+      // 200cm -> 2m, 1000mm -> 1m, explicit meters stay as-is.
+      extra.setAttribute('offset', '200cm 1000mm -1.5m');
+      element.appendChild(extra);
+
+      await waitForEvent(element, 'load');
+
+      const scene = (element as any)[$scene];
+      expect(scene._models[1].position.x).to.be.closeTo(2, 0.001);
+      expect(scene._models[1].position.y).to.be.closeTo(1, 0.001);
+      expect(scene._models[1].position.z).to.be.closeTo(-1.5, 0.001);
+
+      // Bare numbers are still treated as meters.
+      extra.setAttribute('offset', '3 0 0');
+      await timePasses();
+
+      expect(scene._models[1].position.x).to.be.closeTo(3, 0.001);
+    });
+
+    test(
+        'applies orientation as rotation on the model quaternion', async () => {
+          element.loading = 'eager';
+          element.src = CUBE_GLB_PATH;
+
+          const extra = document.createElement('extra-model');
+          extra.setAttribute('src', CUBE_GLB_PATH);
+          // yaw = 90deg (third term in roll/pitch/yaw) → Euler(0, π/2, 0,
+          // 'YXZ') → quaternion.y ≈ 0.707, quaternion.w ≈ 0.707
+          extra.setAttribute('orientation', '0deg 0deg 90deg');
+          element.appendChild(extra);
+
+          await waitForEvent(element, 'load');
+
+          const scene = (element as any)[$scene];
+          const q = scene._models[1].quaternion;
+          expect(q.y).to.be.closeTo(Math.sin(Math.PI / 4), 0.001);
+          expect(q.w).to.be.closeTo(Math.cos(Math.PI / 4), 0.001);
+
+          // Update dynamically
+          extra.setAttribute('orientation', '0deg 0deg 0deg');
+          await timePasses();
+
+          expect(scene._models[1].quaternion.y).to.be.closeTo(0, 0.001);
+          expect(scene._models[1].quaternion.w).to.be.closeTo(1, 0.001);
+        });
 
     test(
         'does not calculate bounding box synchronously when offset changes',

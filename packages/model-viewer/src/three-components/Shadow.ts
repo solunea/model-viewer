@@ -594,8 +594,6 @@ export class Shadow extends Object3D {
     if (this.basicCamera == null || this.renderTarget == null) return;
 
     scene.overrideMaterial = this.depthMaterial;
-    const initialClearAlpha = renderer.getClearAlpha();
-    renderer.setClearAlpha(0);
     this.floor.visible = false;
 
     const xrEnabled = renderer.xr.enabled;
@@ -603,6 +601,8 @@ export class Shadow extends Object3D {
 
     const oldRenderTarget = renderer.getRenderTarget();
     renderer.setRenderTarget(this.renderTarget);
+    const initialClearAlpha = renderer.getClearAlpha();
+    renderer.setClearAlpha(0);
     const state = (renderer as any).state;
     if (state != null) {
       state.buffers.color.setMask(true);
