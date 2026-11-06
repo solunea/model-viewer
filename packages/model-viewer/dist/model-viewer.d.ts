@@ -2663,6 +2663,7 @@ interface ExtraModelPlacement {
 }
 interface ExtraModelTransformInterface {
     getExtraModelPlacement(model: ExtraModelElement): ExtraModelPlacement | null;
+    restoreExtraModelPlacement(model: ExtraModelElement, placement: Pick<ExtraModelPlacement, 'position' | 'scale'>): boolean;
     setExtraModelTransform(model: ExtraModelElement | null, mode?: ExtraModelTransformMode): boolean;
 }
 

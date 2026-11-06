@@ -63,6 +63,15 @@ suite('ExtraModel', () => {
       expect(firstPlacement.meshes).not.to.be.empty;
       expect(secondPlacement.meshes).not.to.be.empty;
       expect(firstPlacement.meshes).not.to.include(secondPlacement.meshes[0]);
+      expect(element.restoreExtraModelPlacement(second, {
+        position: [-1, 0, 0.5],
+        scale: [1, 0.75, 1]
+      })).to.be.true;
+      expect(second.hasAttribute('data-auto-offset')).to.be.true;
+      expect(element.getExtraModelPlacement(second)!.position)
+          .to.deep.equal([-1, 0, 0.5]);
+      expect(element.getExtraModelPlacement(second)!.scale)
+          .to.deep.equal([1, 0.75, 1]);
     });
 
     test('only shows transform handles for a selected extra model', async () => {

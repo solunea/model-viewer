@@ -26,6 +26,9 @@ export interface ExtraModelPlacement {
 
 export interface ExtraModelTransformInterface {
   getExtraModelPlacement(model: ExtraModelElement): ExtraModelPlacement|null;
+  restoreExtraModelPlacement(
+      model: ExtraModelElement,
+      placement: Pick<ExtraModelPlacement, 'position'|'scale'>): boolean;
   setExtraModelTransform(
       model: ExtraModelElement|null, mode?: ExtraModelTransformMode): boolean;
 }
@@ -68,13 +71,14 @@ export const ExtraModelTransformMixin =
           const models = Array.from(this.querySelectorAll('extra-model'));
           const index = models.indexOf(model);
           const sources = models.map((extra) => extra.src);
-          const object = scene.models[index + (this.src ? 1 : 0)];
+          const sceneIndex = index + (this.src ? 1 : 0);
+          const object = scene.models[sceneIndex];
           if (index < 0 || !object ||
               sources.length !== scene.extraUrls.length ||
               sources.some((src, i) => src !== scene.extraUrls[i])) {
             return null;
           }
-          return {scene, object, models, sources};
+          return {scene, sceneIndex, object, models, sources};
         }
 
         getExtraModelPlacement(model: ExtraModelElement): ExtraModelPlacement|null {
@@ -94,6 +98,26 @@ export const ExtraModelTransformMixin =
             scale: object.scale.toArray(),
             meshes
           };
+        }
+
+        // Restore the rendered values after restoring declarative attributes,
+        // including automatic placements whose neighbours have since moved.
+        restoreExtraModelPlacement(
+            model: ExtraModelElement,
+            {position, scale}: Pick<ExtraModelPlacement, 'position'|'scale'>):
+            boolean {
+          const target = this[$resolveExtraModel](model);
+          if (!target || position.length !== 3 || scale.length !== 3 ||
+              !position.every(Number.isFinite) ||
+              !scale.every(value => Number.isFinite(value) && value !== 0)) {
+            return false;
+          }
+          target.scene.updateModelTransforms(
+              target.sceneIndex,
+              position.map(value => value + 'm').join(' '),
+              null,
+              scale.join(' '));
+          return true;
         }
 
         setExtraModelTransform(
