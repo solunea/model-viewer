@@ -2656,7 +2656,13 @@ interface ExtraModelTransformEventDetail {
     offset: string;
     scale: string;
 }
+interface ExtraModelPlacement {
+    position: [number, number, number];
+    scale: [number, number, number];
+    meshes: Mesh$1[];
+}
 interface ExtraModelTransformInterface {
+    getExtraModelPlacement(model: ExtraModelElement): ExtraModelPlacement | null;
     setExtraModelTransform(model: ExtraModelElement | null, mode?: ExtraModelTransformMode): boolean;
 }
 
@@ -2701,4 +2707,4 @@ declare global {
 }
 
 export { ModelViewerElement };
-export type { ExtraModelTransformEventDetail, ExtraModelTransformMode, PanoramaAreaDefinition, PanoramaAreaHit, RGB$1 as RGB, RGBA$1 as RGBA };
+export type { ExtraModelPlacement, ExtraModelTransformEventDetail, ExtraModelTransformMode, PanoramaAreaDefinition, PanoramaAreaHit, RGB$1 as RGB, RGBA$1 as RGBA };

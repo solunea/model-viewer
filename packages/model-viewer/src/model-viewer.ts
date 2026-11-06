@@ -36,7 +36,7 @@ export const ModelViewerElement = ExtraModelTransformMixin(PanoramaAreasMixin(
         ARMixin(LoadingMixin(AnimationMixin(ModelViewerElementBase))))))))));
 
 export type ModelViewerElement = InstanceType<typeof ModelViewerElement>;
-export type{ExtraModelTransformEventDetail, ExtraModelTransformMode} from './features/extra-model-transform.js';
+export type{ExtraModelPlacement, ExtraModelTransformEventDetail, ExtraModelTransformMode} from './features/extra-model-transform.js';
 export type{PanoramaAreaDefinition, PanoramaAreaHit} from './features/panorama-areas.js';
 
 export type{RGB, RGBA} from './three-components/gltf-instance/gltf-2.0';

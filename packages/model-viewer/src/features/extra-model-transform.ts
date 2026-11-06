@@ -1,6 +1,7 @@
 /* @license Copyright 2026 Solunea. Licensed under the Apache License,
  * Version 2.0. */
 
+import {Mesh} from 'three';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 
 import ModelViewerElementBase, {$needsRender, $onModelLoad, $scene, $userInputElement} from '../model-viewer-base.js';
@@ -17,12 +18,20 @@ export interface ExtraModelTransformEventDetail {
   scale: string;
 }
 
+export interface ExtraModelPlacement {
+  position: [number, number, number];
+  scale: [number, number, number];
+  meshes: Mesh[];
+}
+
 export interface ExtraModelTransformInterface {
+  getExtraModelPlacement(model: ExtraModelElement): ExtraModelPlacement|null;
   setExtraModelTransform(
       model: ExtraModelElement|null, mode?: ExtraModelTransformMode): boolean;
 }
 
 const $transform = Symbol('extraModelTransform');
+const $resolveExtraModel = Symbol('resolveExtraModel');
 
 function controlPointer(event: PointerEvent, input: HTMLElement): PointerEvent {
   const {left, top, width, height} = input.getBoundingClientRect();
@@ -50,6 +59,43 @@ export const ExtraModelTransformMixin =
           super[$onModelLoad]();
         }
 
+        private[$resolveExtraModel](model: ExtraModelElement) {
+          const scene = this[$scene];
+          if (!this.isConnected || !this.loaded || scene.externalRenderer ||
+              this.src !== scene.url) {
+            return null;
+          }
+          const models = Array.from(this.querySelectorAll('extra-model'));
+          const index = models.indexOf(model);
+          const sources = models.map((extra) => extra.src);
+          const object = scene.models[index + (this.src ? 1 : 0)];
+          if (index < 0 || !object ||
+              sources.length !== scene.extraUrls.length ||
+              sources.some((src, i) => src !== scene.extraUrls[i])) {
+            return null;
+          }
+          return {scene, object, models, sources};
+        }
+
+        getExtraModelPlacement(model: ExtraModelElement): ExtraModelPlacement|null {
+          const target = this[$resolveExtraModel](model);
+          if (!target) {
+            return null;
+          }
+          const {object} = target;
+          const meshes: Mesh[] = [];
+          object.traverse((node) => {
+            if (node instanceof Mesh) {
+              meshes.push(node);
+            }
+          });
+          return {
+            position: object.position.toArray(),
+            scale: object.scale.toArray(),
+            meshes
+          };
+        }
+
         setExtraModelTransform(
             model: ExtraModelElement|null,
             mode: ExtraModelTransformMode = 'translate'): boolean {
@@ -58,18 +104,11 @@ export const ExtraModelTransformMixin =
           if (model == null) {
             return true;
           }
-          const scene = this[$scene];
-          const models = Array.from(this.querySelectorAll('extra-model'));
-          const index = models.indexOf(model);
-          const sources = models.map((extra) => extra.src);
-          const object = scene.models[index + (this.src ? 1 : 0)];
-          if ((mode !== 'translate' && mode !== 'scale') ||
-              !this.isConnected || !this.loaded || scene.externalRenderer ||
-              index < 0 || !object || this.src !== scene.url ||
-              sources.length !== scene.extraUrls.length ||
-              sources.some((src, i) => src !== scene.extraUrls[i])) {
+          const target = this[$resolveExtraModel](model);
+          if (!target || (mode !== 'translate' && mode !== 'scale')) {
             return false;
           }
+          const {scene, object, models, sources} = target;
 
           const input = this[$userInputElement];
           const controls = new TransformControls(scene.getCamera());

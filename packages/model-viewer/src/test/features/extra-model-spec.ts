@@ -42,6 +42,29 @@ suite('ExtraModel', () => {
   });
 
   suite('declarative transforms', () => {
+    test('reads rendered placement and distinct meshes for repeated sources', async () => {
+      element.loading = 'eager';
+      element.src = CUBE_GLB_PATH;
+      const first = document.createElement('extra-model');
+      const second = document.createElement('extra-model');
+      first.src = second.src = CUBE_GLB_PATH;
+      first.offset = '1m 0m 0m';
+      first.scale = '2 1 1';
+      second.setAttribute('data-auto-offset', '1');
+      element.append(first, second);
+      expect(element.getExtraModelPlacement(first)).to.equal(null);
+      await waitForEvent(element, 'load');
+
+      const firstPlacement = element.getExtraModelPlacement(first)!;
+      const secondPlacement = element.getExtraModelPlacement(second)!;
+      expect(firstPlacement.position).to.deep.equal([1, 0, 0]);
+      expect(firstPlacement.scale).to.deep.equal([2, 1, 1]);
+      expect(secondPlacement.position).not.to.deep.equal([0, 0, 0]);
+      expect(firstPlacement.meshes).not.to.be.empty;
+      expect(secondPlacement.meshes).not.to.be.empty;
+      expect(firstPlacement.meshes).not.to.include(secondPlacement.meshes[0]);
+    });
+
     test('only shows transform handles for a selected extra model', async () => {
       element.loading = 'eager';
       element.src = CUBE_GLB_PATH;
