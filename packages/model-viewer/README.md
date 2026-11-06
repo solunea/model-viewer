@@ -21,7 +21,7 @@ supported to provide a seamless development experience.
 
 ## Installing
 
-### Solunea fork 4.4.0
+### Solunea fork 4.5.0
 
 The fork also includes [native Panorama Areas](PANORAMA_AREAS.md): compact binary
 masks, precise hit detection and a single highlight inside the native renderer.
