@@ -2649,10 +2649,24 @@ interface PanoramaAreasInterface {
     panoramaAreaFromPoint(clientX: number, clientY: number): PanoramaAreaHit | null;
 }
 
+type ExtraModelTransformMode = 'translate' | 'scale';
+interface ExtraModelTransformEventDetail {
+    model: ExtraModelElement;
+    mode: ExtraModelTransformMode;
+    offset: string;
+    scale: string;
+}
+interface ExtraModelTransformInterface {
+    setExtraModelTransform(model: ExtraModelElement | null, mode?: ExtraModelTransformMode): boolean;
+}
+
 declare const ModelViewerElement: {
+    new (...args: any[]): ExtraModelTransformInterface;
+    prototype: ExtraModelTransformInterface;
+} & object & {
     new (...args: any[]): PanoramaAreasInterface;
     prototype: PanoramaAreasInterface;
-} & object & {
+} & {
     new (...args: any[]): AnnotationInterface;
     prototype: AnnotationInterface;
 } & {
@@ -2687,4 +2701,4 @@ declare global {
 }
 
 export { ModelViewerElement };
-export type { PanoramaAreaDefinition, PanoramaAreaHit, RGB$1 as RGB, RGBA$1 as RGBA };
+export type { ExtraModelTransformEventDetail, ExtraModelTransformMode, PanoramaAreaDefinition, PanoramaAreaHit, RGB$1 as RGB, RGBA$1 as RGBA };

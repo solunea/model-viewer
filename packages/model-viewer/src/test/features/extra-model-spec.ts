@@ -42,6 +42,27 @@ suite('ExtraModel', () => {
   });
 
   suite('declarative transforms', () => {
+    test('only shows transform handles for a selected extra model', async () => {
+      element.loading = 'eager';
+      element.src = CUBE_GLB_PATH;
+      const extra = document.createElement('extra-model');
+      extra.src = CUBE_GLB_PATH;
+      expect(element.setExtraModelTransform(extra)).to.equal(false);
+      element.appendChild(extra);
+      await waitForEvent(element, 'load');
+
+      const scene = (element as any)[$scene];
+      const normalChildren = scene.children.length;
+      expect(element.setExtraModelTransform(extra)).to.equal(true);
+      expect(scene.children).to.have.lengthOf(normalChildren + 1);
+      expect(element.setExtraModelTransform(extra, 'scale')).to.equal(true);
+      expect(scene.children).to.have.lengthOf(normalChildren + 1);
+      element.setExtraModelTransform(null);
+      expect(scene.children).to.have.lengthOf(normalChildren);
+      expect(extra.offset).to.equal(null);
+      expect(extra.scale).to.equal(null);
+    });
+
     test('appends extra-model and loads multiple mesh components', async () => {
       element.loading = 'eager';
       element.src = CUBE_GLB_PATH;

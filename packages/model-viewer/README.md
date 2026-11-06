@@ -50,6 +50,22 @@ npm run build --workspace=@solunea/model-viewer
 
 This regenerates the standalone and external-Three.js bundles under `dist/`.
 
+### Editing extra models
+
+Transform handles are opt-in. After the viewer loads, pass the selected
+`<extra-model>` to `setExtraModelTransform` with `translate` or `scale`.
+Pass `null` when leaving the editor or entering playback.
+
+```js
+viewer.setExtraModelTransform(selectedExtraModel, 'translate');
+viewer.setExtraModelTransform(selectedExtraModel, 'scale');
+viewer.setExtraModelTransform(null);
+```
+
+A completed drag writes `offset` and `scale` to the selected element and
+dispatches `extra-model-transform` with the element and the new values.
+Escape cancels the current drag. Source changes clear the selection.
+
 ### NPM
 
 The `<model-viewer>` web component can be installed from [NPM](https://npmjs.org):
