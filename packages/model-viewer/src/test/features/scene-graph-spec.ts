@@ -16,7 +16,7 @@
 import '../renderer-gate.js';
 
 import {expect} from 'chai';
-import {Mesh, MeshStandardMaterial} from 'three';
+import {Box3, Mesh, MeshStandardMaterial, Vector3} from 'three';
 
 import {$currentGLTF} from '../../features/scene-graph.js';
 import {$primitivesList} from '../../features/scene-graph/model.js';
@@ -98,6 +98,27 @@ suite('SceneGraph', () => {
         expect(dim.x).to.be.closeTo(1, 0.001, 'x');
         expect(dim.y).to.be.closeTo(3, 0.001, 'y');
         expect(dim.z).to.be.closeTo(2, 0.001, 'z');
+      });
+
+      test('keeps the bounds at the feet of a tilted skinned model', async () => {
+        element.src = assetPath('models/RobotExpressive.glb');
+        element.shadowIntensity = 1;
+        await waitForEvent(element, 'load');
+        element.cameraTarget = '0m 3m 0m';
+        await element.updateComplete;
+        element.jumpCameraToGoal();
+        await rafPasses();
+
+        element.orientation = '30deg 55deg 150deg';
+        await element.updateComplete;
+        element.getDimensions();
+
+        const scene = element[$scene];
+        scene.updateMatrixWorld(true);
+        const rendered = new Box3().setFromObject(scene.models[0], true);
+        const targetY = scene.target.getWorldPosition(new Vector3()).y;
+        expect(scene.boundingBox.min.y + targetY)
+            .to.be.closeTo(rendered.min.y, 0.001);
       });
 
       test('exports and re-imports the rescaled model', async () => {

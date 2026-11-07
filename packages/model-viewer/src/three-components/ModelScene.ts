@@ -15,7 +15,6 @@
 
 import {AnimationAction, AnimationActionLoopStyles, AnimationClip, AnimationMixer, AnimationMixerEventMap, Box3, Camera, ColorManagement, Euler, Event as ThreeEvent, Intersection, LoopOnce, LoopPingPong, LoopRepeat, Material, Matrix3, Matrix4, Mesh, MeshBasicMaterial, NeutralToneMapping, Object3D, PerspectiveCamera, Raycaster, Scene, ShaderMaterial, Sphere, SphereGeometry, SRGBTransfer, Texture, ToneMapping, Triangle, Vector2, Vector3, WebGLRenderer, XRTargetRaySpace} from 'three';
 import {CSS2DRenderer} from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import {reduceVertices} from 'three/examples/jsm/utils/SceneUtils.js';
 
 import {$currentGLTF, $model, $originalGltfJson} from '../features/scene-graph.js';
 import {$nodeFromIndex, $nodeFromPoint} from '../features/scene-graph/model.js';
@@ -65,6 +64,28 @@ const vector3 = new Vector3();
 const ndc = new Vector2();
 const skyboxDofDirection = new Vector3();
 const COLORED_DEPTH_FAR_HUE = 0.72;
+
+// Recompute skinning matrices after detaching the model from its camera target.
+function reduceModelVertices<T>(
+    model: Object3D, reduce: (result: T, vertex: Vector3) => T, initial: T): T {
+  model.updateMatrixWorld(true);
+  let result = initial;
+  const vertex = new Vector3();
+  model.traverseVisible((object) => {
+    const mesh = object as Mesh;
+    const position = mesh.geometry?.getAttribute('position');
+    if (!position) return;
+    for (let i = 0; i < position.count; i++) {
+      if (mesh.isMesh) {
+        mesh.getVertexPosition(i, vertex);
+      } else {
+        vertex.fromBufferAttribute(position, i);
+      }
+      result = reduce(result, vertex.applyMatrix4(object.matrixWorld));
+    }
+  });
+  return result;
+}
 
 export interface SkyboxDofOptions {
   focusMode: string;
@@ -693,7 +714,7 @@ export class ModelScene extends Scene {
 
     let combinedBox = new Box3();
     for (const mod of models) {
-      combinedBox = reduceVertices(mod, bound, combinedBox);
+      combinedBox = reduceModelVertices(mod, bound, combinedBox);
     }
     this.boundingBox = combinedBox;
 
@@ -703,7 +724,7 @@ export class ModelScene extends Scene {
       this.bakedShadows.forEach((mesh) => this.unmarkBakedShadow(mesh));
       combinedBox = new Box3();
       for (const mod of models) {
-        combinedBox = reduceVertices(mod, bound, combinedBox);
+        combinedBox = reduceModelVertices(mod, bound, combinedBox);
       }
       this.boundingBox = combinedBox;
     }
@@ -748,7 +769,7 @@ export class ModelScene extends Scene {
     let maxRadiusSq = 0;
     for (const mod of models) {
       maxRadiusSq =
-          Math.max(maxRadiusSq, reduceVertices(mod, radiusSquared, 0));
+          Math.max(maxRadiusSq, reduceModelVertices(mod, radiusSquared, 0));
     }
     this.boundingSphere.radius = Math.sqrt(maxRadiusSq);
 
@@ -761,7 +782,7 @@ export class ModelScene extends Scene {
 
     let maxAspect = 0;
     for (const mod of models) {
-      maxAspect = Math.max(maxAspect, reduceVertices(mod, horizontalTanFov, 0));
+      maxAspect = Math.max(maxAspect, reduceModelVertices(mod, horizontalTanFov, 0));
     }
     this.idealAspect =
         maxAspect / Math.tan((this.framedFoVDeg / 2) * Math.PI / 180);
