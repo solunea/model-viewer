@@ -109,14 +109,15 @@ suite('PanoramaAreas geometry and lifecycle', () => {
         areas.setAreas([shape]);
         expect(areas.fromPoint(...point(16.5 / 64, 16.5 / 32))).to.equal(null);
       });
-  test('changes highlight color without recreating the mask texture', () => {
+  test('changes highlight colors without recreating the mask texture', () => {
     areas.setAreas([definition()]);
     areas.setHighlight('area', '#ff0000');
     const mesh = areas.children[0] as Mesh<SphereGeometry, ShaderMaterial>;
     const texture = mesh.material.uniforms.mask.value;
     expect(mesh.material.uniforms.highlightColor.value.equals(new Color('#ff0000'))).to.equal(true);
-    areas.setHighlight('area', 'rgb(0, 255, 0)');
+    areas.setHighlight('area', 'rgb(0, 255, 0)', '#112233');
     expect(mesh.material.uniforms.highlightColor.value.equals(new Color('#00ff00'))).to.equal(true);
+    expect(mesh.material.uniforms.highlightContrast.value.equals(new Color('#112233'))).to.equal(true);
     expect(mesh.material.uniforms.mask.value).to.equal(texture);
   });
   test('handles seam, poles and CSS window coordinates after resize', () => {

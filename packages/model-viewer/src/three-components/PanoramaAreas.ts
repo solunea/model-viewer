@@ -62,6 +62,7 @@ export class PanoramaAreas extends Group {
   private active = false;
   private capturing = false;
   private highlightColor = new Color('#8061e6');
+  private highlightContrast = new Color('white');
 
   constructor(private scene: ModelScene, private textureLimit = 4096) {
     super();
@@ -92,13 +93,17 @@ export class PanoramaAreas extends Group {
     this.update();
   }
 
-  setHighlight(name: string|null, color?: string) {
+  setHighlight(name: string|null, color?: string, contrastColor?: string) {
     const nextColor = color ? new Color(color) : this.highlightColor;
-    const colorChanged = !this.highlightColor.equals(nextColor);
+    const nextContrast =
+        contrastColor ? new Color(contrastColor) : this.highlightContrast;
+    const colorChanged = !this.highlightColor.equals(nextColor) ||
+        !this.highlightContrast.equals(nextContrast);
     if (name === this.highlighted && !colorChanged) {
       return;
     }
     this.highlightColor.copy(nextColor);
+    this.highlightContrast.copy(nextContrast);
     this.highlighted = name;
     this.update();
     if (colorChanged && this.visible) this.scene.queueRender();
@@ -183,23 +188,73 @@ export class PanoramaAreas extends Group {
           uniforms: {
             mask: {value: null},
             highlightColor: {value: this.highlightColor},
+            highlightContrast: {value: this.highlightContrast},
+            pixelsPerCssPixel: {value: new Vector2(1, 1)},
             panorama: {value: new Vector2()},
             bounds: {value: new Vector4()}
           },
           vertexShader: `varying vec3 direction;
             void main(){direction=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-          fragmentShader: `precision highp float;
-            uniform sampler2D mask;uniform vec2 panorama;uniform vec4 bounds;uniform vec3 highlightColor;varying vec3 direction;
-            void main(){vec3 d=normalize(direction);
-              vec2 uv=vec2(fract(.25+atan(d.x,-d.z)/6.28318530718),.5-asin(clamp(d.y,-1.,1.))/3.14159265359);
-              vec2 p=min(floor(uv*panorama),panorama-1.)-bounds.xy;
-              if(p.x<0.||p.y<0.||p.x>=bounds.z||p.y>=bounds.w)discard;
-              float alpha=texture2D(mask,(p+.5)/bounds.zw).r;
-              if(alpha<.5)discard;gl_FragColor=vec4(highlightColor,.3);
+          fragmentShader: `
+            precision highp float;
+            uniform sampler2D mask;
+            uniform vec2 panorama, pixelsPerCssPixel;
+            uniform vec4 bounds;
+            uniform vec3 highlightColor, highlightContrast;
+            varying vec3 direction;
+
+            float coverage(vec2 pixel) {
+              vec2 p = floor(vec2(mod(pixel.x, panorama.x),
+                                  clamp(pixel.y, 0., panorama.y - 1.))) - bounds.xy;
+              if (any(lessThan(p, vec2(0.))) || any(greaterThanEqual(p, bounds.zw))) return 0.;
+              return texture2D(mask, (p + .5) / bounds.zw).r;
+            }
+
+            float blurMask(vec2 p, vec2 x, vec2 y) {
+              vec2 diagonalA = (x + y) * .70710678;
+              vec2 diagonalB = (x - y) * .70710678;
+              return (coverage(p + x) + coverage(p - x) + coverage(p + y) + coverage(p - y)
+                    + coverage(p + diagonalA) + coverage(p - diagonalA)
+                    + coverage(p + diagonalB) + coverage(p - diagonalB)) / 8.;
+            }
+
+            void main() {
+              vec3 d = normalize(direction);
+              vec2 uv = vec2(fract(.25 + atan(d.x, -d.z) / 6.28318530718),
+                             .5 - asin(clamp(d.y, -1., 1.)) / 3.14159265359);
+              vec2 dx = dFdx(uv), dy = dFdy(uv);
+              // Take the short step across the equirectangular seam.
+              dx.x -= round(dx.x);
+              dy.x -= round(dy.x);
+              vec2 x = dx * panorama * pixelsPerCssPixel.x;
+              vec2 y = dy * panorama * pixelsPerCssPixel.y;
+              vec2 p = uv * panorama;
+              const float outerRadius = 7.;
+
+              // Avoid blur samples outside the neighbourhood of the uploaded mask.
+              vec2 distanceFromCenter = abs(p - (bounds.xy + .5 * bounds.zw));
+              distanceFromCenter.x = min(distanceFromCenter.x, panorama.x - distanceFromCenter.x);
+              if (any(greaterThan(distanceFromCenter, .5 * bounds.zw + outerRadius * (abs(x) + abs(y))))) discard;
+
+              if (coverage(p) > .5) {
+                gl_FragColor = vec4(highlightColor, .3);
+              } else {
+                float inner = .3 * blurMask(p, 3. * x, 3. * y);
+                float outer = .3 * blurMask(p, outerRadius * x, outerRadius * y) * (1. - inner);
+                float alpha = inner + outer;
+                if (alpha == 0.) discard;
+                gl_FragColor = vec4((inner * highlightColor + outer * highlightContrast) / alpha, alpha);
+              }
               #include <colorspace_fragment>
             }`
         });
         this.mesh = new Mesh(new SphereGeometry(radius, 64, 32), material);
+        const viewport = new Vector4();
+        this.mesh.onBeforeRender = (renderer) => {
+          renderer.getCurrentViewport(viewport);
+          material.uniforms.pixelsPerCssPixel.value.set(
+              viewport.z / this.scene.width, viewport.w / this.scene.height);
+        };
         this.mesh.name = 'PanoramaAreaHighlight';
         this.mesh.userData.noHit = true;
         this.mesh.raycast = () => {};

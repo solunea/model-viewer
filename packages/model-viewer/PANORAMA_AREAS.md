@@ -11,7 +11,7 @@ import type {PanoramaAreaDefinition} from '@solunea/model-viewer';
 
 viewer.setPanoramaAreas(areas); // Replaces the ordered collection; [] clears it.
 viewer.setPanoramaAreaHighlight('hotspot-rock'); // null clears the highlight.
-viewer.setPanoramaAreaHighlight('hotspot-rock', '#ff6600'); // Optional CSS color.
+viewer.setPanoramaAreaHighlight('hotspot-rock', '#ff6600', '#fff'); // Optional CSS colors for the fill and contrasting halo.
 const hit = viewer.panoramaAreaFromPoint(event.clientX, event.clientY);
 // hit: {name, u, v} | null. Coordinates are CSS window coordinates.
 ```
