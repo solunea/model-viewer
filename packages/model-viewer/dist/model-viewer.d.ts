@@ -2645,7 +2645,8 @@ interface PanoramaAreaHit {
 
 interface PanoramaAreasInterface {
     setPanoramaAreas(areas: readonly PanoramaAreaDefinition[]): void;
-    setPanoramaAreaHighlight(name: string | null, color?: string, contrastColor?: string): void;
+    setPanoramaAreaHighlight(name: string | null, color?: string): void;
+    setPanoramaAreaShine(enabled: boolean): void;
     panoramaAreaFromPoint(clientX: number, clientY: number): PanoramaAreaHit | null;
 }
 

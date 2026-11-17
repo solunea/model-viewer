@@ -2,7 +2,7 @@
  * Version 2.0. */
 import {PropertyValues} from 'lit';
 
-import ModelViewerElementBase, {$needsRender, $renderer, $scene, ToBlobOptions} from '../model-viewer-base.js';
+import ModelViewerElementBase, {$needsRender, $renderer, $scene, $tick, ToBlobOptions} from '../model-viewer-base.js';
 import {PanoramaAreaDefinition, PanoramaAreaHit, PanoramaAreas} from '../three-components/PanoramaAreas.js';
 import {Constructor} from '../utilities.js';
 
@@ -10,7 +10,8 @@ export type{PanoramaAreaDefinition, PanoramaAreaHit} from '../three-components/P
 
 export interface PanoramaAreasInterface {
   setPanoramaAreas(areas: readonly PanoramaAreaDefinition[]): void;
-  setPanoramaAreaHighlight(name: string|null, color?: string, contrastColor?: string): void;
+  setPanoramaAreaHighlight(name: string|null, color?: string): void;
+  setPanoramaAreaShine(enabled: boolean): void;
   panoramaAreaFromPoint(clientX: number, clientY: number): PanoramaAreaHit|null;
 }
 
@@ -54,9 +55,17 @@ export const PanoramaAreasMixin =
           this[$areas].setAreas(areas);
         }
 
-        setPanoramaAreaHighlight(
-            name: string|null, color?: string, contrastColor?: string) {
-          this[$areas].setHighlight(name, color, contrastColor);
+        setPanoramaAreaHighlight(name: string|null, color?: string) {
+          this[$areas].setHighlight(name, color);
+        }
+
+        setPanoramaAreaShine(enabled: boolean) {
+          this[$areas].setShine(enabled);
+        }
+
+        [$tick](time: number, delta: number) {
+          super[$tick](time, delta);
+          this[$areas].tick(time);
         }
 
         panoramaAreaFromPoint(clientX: number, clientY: number): PanoramaAreaHit

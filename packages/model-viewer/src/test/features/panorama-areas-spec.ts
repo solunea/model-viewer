@@ -109,16 +109,40 @@ suite('PanoramaAreas geometry and lifecycle', () => {
         areas.setAreas([shape]);
         expect(areas.fromPoint(...point(16.5 / 64, 16.5 / 32))).to.equal(null);
       });
-  test('changes highlight colors without recreating the mask texture', () => {
+  test('changes highlight color without recreating the mask texture', () => {
     areas.setAreas([definition()]);
     areas.setHighlight('area', '#ff0000');
     const mesh = areas.children[0] as Mesh<SphereGeometry, ShaderMaterial>;
     const texture = mesh.material.uniforms.mask.value;
     expect(mesh.material.uniforms.highlightColor.value.equals(new Color('#ff0000'))).to.equal(true);
-    areas.setHighlight('area', 'rgb(0, 255, 0)', '#112233');
+    areas.setHighlight('area', 'rgb(0, 255, 0)');
     expect(mesh.material.uniforms.highlightColor.value.equals(new Color('#00ff00'))).to.equal(true);
-    expect(mesh.material.uniforms.highlightContrast.value.equals(new Color('#112233'))).to.equal(true);
     expect(mesh.material.uniforms.mask.value).to.equal(texture);
+  });
+  test('sweeps both masks at rest and restores the regular hover tint', () => {
+    areas.setAreas([definition('left', x => x < 16), definition('right', x => x > 18)]);
+    areas.setHighlight(null, '#00ff00');
+    areas.setShine(true);
+    const mesh = areas.children[0] as Mesh<SphereGeometry, ShaderMaterial>;
+    const {uniforms} = mesh.material;
+    const pixels = uniforms.mask.value.image.data;
+    expect(pixels[15]).to.equal(255);
+    expect(pixels[17]).to.equal(0);
+    expect(pixels[19]).to.equal(255);
+    expect(areas.fromPoint(...center())).to.equal(null);
+    areas.tick(1000);
+    areas.tick(1950);
+    expect(uniforms.shineProgress.value).to.equal(.5);
+    expect(uniforms.highlightColor.value.equals(new Color('#00ff00'))).to.equal(true);
+    areas.setHighlight('left');
+    expect(uniforms.shineProgress.value).to.equal(-1);
+    areas.tick(2200);
+    expect(uniforms.shineProgress.value).to.equal(-1);
+    areas.setHighlight(null);
+    areas.tick(2200);
+    expect(uniforms.shineProgress.value).to.be.greaterThan(.5);
+    areas.setShine(false);
+    expect(areas.visible).to.equal(false);
   });
   test('handles seam, poles and CSS window coordinates after resize', () => {
     areas.setAreas([definition(
