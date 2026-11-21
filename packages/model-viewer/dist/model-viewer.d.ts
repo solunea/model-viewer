@@ -1,5 +1,5 @@
 import * as three from 'three';
-import { Object3D, Material as Material$4, Texture as Texture$4, Group, Vector3 as Vector3$1, Mesh as Mesh$1, WebGLRenderer, Scene as Scene$1, AnimationActionLoopStyles, PerspectiveCamera as PerspectiveCamera$1, Camera as Camera$2, Box3, Sphere, ToneMapping, Vector2, AnimationMixerEventMap, Intersection, XRTargetRaySpace, Matrix4 as Matrix4$1, EventDispatcher, Event as Event$1, MeshPhysicalMaterial } from 'three';
+import { Object3D, Material as Material$4, Texture as Texture$4, Group, Vector3 as Vector3$1, Mesh as Mesh$1, WebGLRenderer, Scene as Scene$1, AnimationActionLoopStyles, PerspectiveCamera as PerspectiveCamera$1, Camera as Camera$2, Box3, Sphere, ToneMapping, Vector2, DataTexture, AnimationMixerEventMap, Intersection, XRTargetRaySpace, Matrix4 as Matrix4$1, EventDispatcher, Event as Event$1, MeshPhysicalMaterial } from 'three';
 export { CanvasTexture, FileLoader, Loader, NearestFilter } from 'three';
 import * as three_examples_jsm_loaders_GLTFLoader_js from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTF as GLTF$2, GLTFReference, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -947,6 +947,13 @@ declare class Shadow extends Object3D {
     private renderPCSS;
 }
 
+interface SkyboxDepthImage {
+    width: number;
+    height: number;
+    bitDepth: 8 | 16;
+    samples: Uint8Array;
+}
+
 interface ModelSceneConfig {
     element: ModelViewerElementBase;
     canvas: HTMLCanvasElement;
@@ -965,6 +972,17 @@ interface SkyboxDofOptions {
     maxBlur: number;
     focusSmoothing: number;
     depthInvert?: boolean;
+}
+interface SkyboxDofFrame {
+    skybox: Texture$4;
+    depth: DataTexture;
+    bitDepth: 8 | 16;
+    focus: number;
+    strength: number;
+    maxBlur: number;
+    invert: boolean;
+    opacity: number;
+    hideDuringRender: Object3D | null;
 }
 /**
  * A THREE.Scene object that takes a Model and CanvasHTMLElement and
@@ -1015,10 +1033,10 @@ declare class ModelScene extends Scene$1 {
     private skyboxTransitionPending;
     private skyboxTransitionDamper;
     private skyboxTransition;
-    private skyboxDofMesh;
-    private skyboxDofSkybox;
-    private skyboxDofDepth;
-    private skyboxDofSampleCache;
+    private skyboxDepth;
+    private outgoingSkyboxDepth;
+    private skyboxDofFade;
+    private skyboxDofTargetFocus;
     private skyboxDofFocusMode;
     private skyboxDofManualFocus;
     private skyboxDofCurrentFocus;
@@ -1113,17 +1131,18 @@ declare class ModelScene extends Scene$1 {
     private disposeReplacedTransientTextures;
     private currentSkybox;
     setBackground(skybox: Texture$4 | null): void;
-    private clearSkyboxDof;
-    private disposeSkyboxDof;
+    get skyboxDofEnabled(): boolean;
+    private getDepthForSkybox;
+    clearSkyboxDepth(): void;
+    setSkyboxDepth(color: Texture$4 | null, image: SkyboxDepthImage | null): void;
     setSkyboxDofOptions(options: SkyboxDofOptions): void;
-    private updateSkyboxDofUniforms;
-    private updateSkyboxDofTransform;
-    private getSkyboxDofDepthCanvas;
-    private getSkyboxDofCenterUv;
-    private rgbToHue;
-    private decodeSkyboxDofDepthPixel;
+    private activeSkyboxDepth;
+    hasSkyboxDepth(): boolean;
+    getSkyboxDofFrame(): SkyboxDofFrame | null;
     getSkyboxDofFocus(): number;
     getSkyboxDofAutoFocusTarget(): number | null;
+    getSkyboxDepthAtPoint(clientX: number, clientY: number): number | null;
+    getSkyboxDepthInDirection(direction: Vector3$1): number | null;
     updateSkyboxDof(deltaMilliseconds: number): boolean;
     setSkyboxInterpolationDecay(decayMilliseconds: number): void;
     private shouldTransitionSkybox;
@@ -1670,6 +1689,7 @@ declare class Renderer extends EventDispatcher<{
     private lastStep;
     private avgFrameDuration;
     private viewHelpers;
+    private skyboxDof;
     get canRender(): boolean;
     get scaleFactor(): number;
     set minScale(scale: number);
@@ -1711,6 +1731,7 @@ declare class Renderer extends EventDispatcher<{
      */
     preRender(scene: ModelScene, t: number, delta: number): void;
     render(t: number, frame?: XRFrame, forceScene?: ModelScene): void;
+    private releaseUnusedSkyboxDof;
     dispose(): Array<ModelViewerElementBase>;
     onWebGLContextLost: (event: Event$1) => void;
     onWebGLContextRestored: () => void;
@@ -1882,6 +1903,7 @@ declare class ModelViewerElementBase extends ReactiveElement {
     protected [$resizeObserver]: ResizeObserver | null;
     protected [$intersectionObserver]: IntersectionObserver | null;
     protected [$progressTracker]: ProgressTracker;
+    private loadingPanorama;
     /** @export */
     get loaded(): boolean;
     get [$renderer](): Renderer;
@@ -1917,6 +1939,7 @@ declare class ModelViewerElementBase extends ReactiveElement {
     [$getLoaded](): boolean;
     [$getModelIsVisible](): boolean;
     [$shouldAttemptPreload](): boolean;
+    protected get panoramaSource(): string | null;
     /**
      * Called on initialization and when the resize observer fires.
      */
@@ -2464,6 +2487,8 @@ declare interface ControlsInterface {
 declare interface EnvironmentInterface {
     environmentImage: string | null;
     skyboxImage: string | null;
+    skyboxDepthImage: string | null;
+    skyboxDepthInvert: boolean;
     skyboxDofFocusMode: string;
     skyboxDofFocus: number;
     skyboxDofStrength: number;
@@ -2613,6 +2638,8 @@ declare type HotspotData = {
 declare interface AnnotationInterface {
     updateHotspot(config: HotspotConfiguration): void;
     queryHotspot(name: string): HotspotData | null;
+    focusSkyboxOnHotspot(name: string): number | null;
+    focusSkyboxAtPoint(clientX: number, clientY: number): number | null;
     positionAndNormalFromPoint(pixelX: number, pixelY: number): {
         position: Vector3D;
         normal: Vector3D;

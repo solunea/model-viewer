@@ -24,6 +24,7 @@ import {ARRenderer} from './ARRenderer.js';
 import {CachingGLTFLoader} from './CachingGLTFLoader.js';
 import {ModelViewerGLTFInstance} from './gltf-instance/ModelViewerGLTFInstance.js';
 import {ModelScene} from './ModelScene.js';
+import {SkyboxDof, supportsSkyboxDof} from './SkyboxDof.js';
 import TextureUtils from './TextureUtils.js';
 import {ModelViewerViewHelper, ViewHelperOrbit} from './ViewHelper.js';
 
@@ -113,6 +114,7 @@ export class Renderer extends
   private avgFrameDuration =
       (HIGH_FRAME_DURATION_MS + LOW_FRAME_DURATION_MS) / 2;
   private viewHelpers = new Map<ModelScene, ModelViewerViewHelper>();
+  private skyboxDof: SkyboxDof|null = null;
 
   get canRender() {
     return this.threeRenderer != null;
@@ -200,6 +202,9 @@ export class Renderer extends
   unregisterScene(scene: ModelScene) {
     this.scenes.delete(scene);
     this.disposeViewHelper(scene);
+    if (this.skyboxDof != null) {
+      this.releaseUnusedSkyboxDof();
+    }
 
     if (this.canvas3D.parentElement === scene.canvas.parentElement) {
       scene.canvas.parentElement!.removeChild(this.canvas3D);
@@ -564,7 +569,14 @@ export class Renderer extends
         this.threeRenderer.autoClear =
             true;  // this might get reset by the effectRenderer
         this.threeRenderer.toneMapping = scene.toneMapping;
-        this.threeRenderer.render(scene, scene.camera);
+        const dof = scene.getSkyboxDofFrame();
+        if (dof != null && supportsSkyboxDof(this.threeRenderer, dof.skybox)) {
+          const effect = this.skyboxDof ??= new SkyboxDof();
+          effect.reportFrame(t, delta);
+          effect.render(this.threeRenderer, scene, dof, width, height);
+        } else {
+          this.threeRenderer.render(scene, scene.camera);
+        }
       }
       this.renderViewHelper(scene, 0, viewportY, width, height);
       if (this.multipleScenesVisible ||
@@ -579,9 +591,24 @@ export class Renderer extends
       ++scene.renderCount;
       this.renderedLastFrame = true;
     }
+    if (this.skyboxDof != null) {
+      this.releaseUnusedSkyboxDof();
+    }
+  }
+
+  private releaseUnusedSkyboxDof() {
+    for (const scene of this.scenes) {
+      if (scene.hasSkyboxDepth()) {
+        return;
+      }
+    }
+    this.skyboxDof?.dispose();
+    this.skyboxDof = null;
   }
 
   dispose(): Array<ModelViewerElementBase> {
+    this.skyboxDof?.dispose();
+    this.skyboxDof = null;
     if (this.textureUtils != null) {
       this.textureUtils.dispose();
     }
@@ -613,6 +640,8 @@ export class Renderer extends
   };
 
   onWebGLContextRestored = () => {
+    this.skyboxDof?.dispose();
+    this.skyboxDof = null;
     this.textureUtils?.dispose();
     this.textureUtils =
         this.canRender ? new TextureUtils(this.threeRenderer) : null;

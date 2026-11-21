@@ -23,7 +23,7 @@ import {makeTemplate} from './template.js';
 import {$evictionPolicy, CachingGLTFLoader} from './three-components/CachingGLTFLoader.js';
 import {ModelScene} from './three-components/ModelScene.js';
 import {ContextLostEvent, Renderer} from './three-components/Renderer.js';
-import {clamp, debounce} from './utilities.js';
+import {clamp, debounce, deserializeUrl} from './utilities.js';
 import {ProgressTracker} from './utilities/progress-tracker.js';
 
 const CLEAR_MODEL_TIMEOUT_MS = 10;
@@ -276,6 +276,7 @@ export default class ModelViewerElementBase extends ReactiveElement {
   protected[$intersectionObserver]: IntersectionObserver|null = null;
 
   protected[$progressTracker]: ProgressTracker = new ProgressTracker();
+  private loadingPanorama: {url: string}|null = null;
 
   /** @export */
   get loaded() {
@@ -620,7 +621,13 @@ export default class ModelViewerElementBase extends ReactiveElement {
 
   [$shouldAttemptPreload](): boolean {
     const extraModels = Array.from(this.querySelectorAll('extra-model'));
-    return !!(this.src || extraModels.length > 0) && this[$isElementInViewport];
+    return !!(this.src || extraModels.length > 0 || this.panoramaSource) &&
+        this[$isElementInViewport];
+  }
+
+  protected get panoramaSource(): string|null {
+    const {skyboxOnly, skyboxImage} = this[$scene].element;
+    return skyboxOnly ? deserializeUrl(skyboxImage) : null;
   }
 
   /**
@@ -708,12 +715,17 @@ export default class ModelViewerElementBase extends ReactiveElement {
         extraModels.map(m => m.src).filter(src => src != null) as Array<string>;
     const extraUrlsMatch =
         extraUrlsList.join(',') === (scene.extraUrls || []).join(',');
+    const panorama =
+        !this.src && extraUrlsList.length === 0 ? this.panoramaSource : null;
 
     if (this.loaded || !this[$shouldAttemptPreload]() ||
-        (this.src === scene.url && extraUrlsMatch)) {
+        (panorama != null ? this.loadingPanorama?.url === panorama :
+                            this.src === scene.url && extraUrlsMatch)) {
       return;
     }
 
+    const panoramaRequest = panorama == null ? null : {url: panorama};
+    this.loadingPanorama = panoramaRequest;
     const source = this.src;
     const heroSrc = source || extraUrlsList[0] || null;
 
@@ -736,6 +748,12 @@ export default class ModelViewerElementBase extends ReactiveElement {
 
       await Promise.all([srcUpdated, envUpdated]);
 
+      if (panoramaRequest != null &&
+          (this.loadingPanorama !== panoramaRequest ||
+           this.panoramaSource !== panoramaRequest.url ||
+           this.src != null)) {
+        return;
+      }
       const extraModels = Array.from(this.querySelectorAll('extra-model')) as
           Array<import('./features/extra-model.js').ExtraModelElement>;
       extraModels.forEach((m, i) => {
@@ -774,6 +792,9 @@ export default class ModelViewerElementBase extends ReactiveElement {
       this.dispatchEvent(new CustomEvent(
           'error', {detail: {type: 'loadfailure', sourceError: error}}));
     } finally {
+      if (this.loadingPanorama === panoramaRequest) {
+        this.loadingPanorama = null;
+      }
       updateSourceProgress(1.0);
     }
   }

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import {Vector3} from 'three';
+import {PerspectiveCamera, Vector3} from 'three';
 
 import ModelViewerElementBase, {$needsRender, $onModelLoad, $scene, $tick, toVector2D, toVector3D, Vector2D, Vector3D} from '../model-viewer-base.js';
 import {Hotspot, HotspotConfiguration} from '../three-components/Hotspot.js';
@@ -25,6 +25,8 @@ const $mutationCallback = Symbol('mutationCallback');
 const $observer = Symbol('observer');
 const $addHotspot = Symbol('addHotspot');
 const $removeHotspot = Symbol('removeHotspot');
+const annotationCameraPosition = new Vector3();
+const annotationHotspotPosition = new Vector3();
 
 
 
@@ -38,6 +40,8 @@ export declare type HotspotData = {
 export declare interface AnnotationInterface {
   updateHotspot(config: HotspotConfiguration): void;
   queryHotspot(name: string): HotspotData|null;
+  focusSkyboxOnHotspot(name: string): number|null;
+  focusSkyboxAtPoint(clientX: number, clientY: number): number|null;
   positionAndNormalFromPoint(pixelX: number, pixelY: number): {
     position: Vector3D,
     normal: Vector3D,
@@ -58,6 +62,7 @@ export const AnnotationMixin = <T extends Constructor<ModelViewerElementBase>>(
     ModelViewerElement: T): Constructor<AnnotationInterface>&T => {
   class AnnotationModelViewerElement extends ModelViewerElement {
     private[$hotspotMap] = new Map<string, Hotspot>();
+    private panoramaAnnotationCamera: PerspectiveCamera|null = null;
     private[$mutationCallback] = (mutations: Array<unknown>) => {
       mutations.forEach((mutation) => {
         // NOTE: Be wary that in ShadyDOM cases, the MutationRecord
@@ -125,8 +130,35 @@ export const AnnotationMixin = <T extends Constructor<ModelViewerElementBase>>(
         scene.animateSurfaceHotspots();
         scene.updateHotspotsVisibility(camera.position);
         annotationRenderer.domElement.style.display = '';
-        annotationRenderer.render(scene, camera);
+        annotationRenderer.render(scene, this.getAnnotationCamera());
       }
+    }
+
+    private getAnnotationCamera() {
+      const scene = this[$scene];
+      const camera = scene.getCamera();
+      if (camera !== scene.camera || !scene.element.skyboxOnly ||
+          scene.models.length > 0 || this[$hotspotMap].size === 0) {
+        return camera;
+      }
+
+      // Panorama-only controls use a millimetric orbit. Use the same view
+      // with enough depth range for world-space hotspots in the CSS renderer.
+      camera.getWorldPosition(annotationCameraPosition);
+      const annotationCamera =
+          this.panoramaAnnotationCamera ??= new PerspectiveCamera();
+      annotationCamera.copy(scene.camera, false);
+      annotationCamera.matrixWorldAutoUpdate = false;
+      for (const hotspot of this[$hotspotMap].values()) {
+        const distance = hotspot.getWorldPosition(annotationHotspotPosition)
+                             .distanceTo(annotationCameraPosition);
+        if (Number.isFinite(distance)) {
+          annotationCamera.far =
+              Math.max(annotationCamera.far, distance + annotationCamera.near);
+        }
+      }
+      annotationCamera.updateProjectionMatrix();
+      return annotationCamera;
     }
 
     /**
@@ -168,7 +200,7 @@ export const AnnotationMixin = <T extends Constructor<ModelViewerElementBase>>(
       const facingCamera = hotspot.facingCamera;
 
       const scene = this[$scene];
-      const camera = scene.getCamera();
+      const camera = this.getAnnotationCamera();
       const vector = new Vector3();
 
       vector.setFromMatrixPosition(hotspot.matrixWorld);
@@ -189,6 +221,32 @@ export const AnnotationMixin = <T extends Constructor<ModelViewerElementBase>>(
       }
 
       return {position, normal, canvasPosition, facingCamera};
+    }
+
+    /** Focus the panorama on the ray from the camera to a hotspot. */
+    focusSkyboxOnHotspot(name: string): number|null {
+      const hotspot = this[$hotspotMap].get(name);
+      if (hotspot == null) {
+        return null;
+      }
+      const scene = this[$scene];
+      const origin = scene.getCamera().getWorldPosition(new Vector3());
+      const direction = hotspot.getWorldPosition(new Vector3()).sub(origin);
+      return this.applySkyboxFocus(scene.getSkyboxDepthInDirection(direction));
+    }
+
+    /** Focus the panorama at a point in viewport coordinates. */
+    focusSkyboxAtPoint(clientX: number, clientY: number): number|null {
+      return this.applySkyboxFocus(this[$scene].getSkyboxDepthAtPoint(clientX, clientY));
+    }
+
+    private applySkyboxFocus(depth: number|null): number|null {
+      if (depth != null) {
+        const {element} = this[$scene];
+        element.skyboxDofFocusMode = 'manual';
+        element.skyboxDofFocus = depth;
+      }
+      return depth;
     }
 
     /**

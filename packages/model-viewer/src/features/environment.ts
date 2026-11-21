@@ -16,7 +16,8 @@
 import {property} from 'lit/decorators.js';
 import {ACESFilmicToneMapping, AgXToneMapping, CineonToneMapping, LinearToneMapping, NeutralToneMapping, NoToneMapping, ReinhardToneMapping, Texture} from 'three';
 
-import ModelViewerElementBase, {$needsRender, $progressTracker, $renderer, $scene, $shouldAttemptPreload} from '../model-viewer-base.js';
+import ModelViewerElementBase, {$needsRender, $progressTracker, $renderer, $scene, $shouldAttemptPreload, $updateSource} from '../model-viewer-base.js';
+import {loadSkyboxDepth, SkyboxDepthImage} from '../three-components/SkyboxDepth.js';
 import {clamp, Constructor, deserializeUrl} from '../utilities.js';
 
 export const BASE_OPACITY = 0.5;
@@ -33,11 +34,20 @@ export type ToneMappingValue = 'auto'|'aces'|'agx'|'commerce'|'neutral'|
 export const $currentEnvironmentMap = Symbol('currentEnvironmentMap');
 export const $currentBackground = Symbol('currentBackground');
 export const $updateEnvironment = Symbol('updateEnvironment');
-const $cancelEnvironmentUpdate = Symbol('cancelEnvironmentUpdate');
+
+interface SkyboxDepthRequest {
+  color: string;
+  url: string;
+  credentials: boolean;
+  controller: AbortController;
+  image: SkyboxDepthImage|null;
+}
 
 export declare interface EnvironmentInterface {
   environmentImage: string|null;
   skyboxImage: string|null;
+  skyboxDepthImage: string|null;
+  skyboxDepthInvert: boolean;
   skyboxDofFocusMode: string;
   skyboxDofFocus: number;
   skyboxDofStrength: number;
@@ -63,6 +73,12 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     @property({type: String, attribute: 'skybox-image'})
     skyboxImage: string|null = null;
+
+    @property({type: String, attribute: 'skybox-depth-image'})
+    skyboxDepthImage: string|null = null;
+
+    @property({type: Boolean, attribute: 'skybox-depth-invert'})
+    skyboxDepthInvert = false;
 
     @property({type: String, attribute: 'skybox-dof-focus-mode'})
     skyboxDofFocusMode: string = 'manual';
@@ -107,7 +123,21 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
     protected[$currentEnvironmentMap]: Texture|null = null;
     protected[$currentBackground]: Texture|null = null;
 
-    private[$cancelEnvironmentUpdate]: ((...args: any[]) => any)|null = null;
+    private environmentRequest = 0;
+    private backgroundUrl: string|null = null;
+    private depthRequest: SkyboxDepthRequest|null = null;
+
+    connectedCallback() {
+      super.connectedCallback();
+      this.refreshSkyboxDepth();
+    }
+
+    disconnectedCallback() {
+      super.disconnectedCallback();
+      this.depthRequest?.controller.abort();
+      this.depthRequest = null;
+      this[$scene].clearSkyboxDepth();
+    }
 
     updated(changedProperties: Map<string|number|symbol, unknown>) {
       super.updated(changedProperties);
@@ -164,23 +194,23 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
       }
 
       if ((changedProperties.has('environmentImage') ||
-           changedProperties.has('skyboxImage')) &&
+           changedProperties.has('skyboxImage') ||
+           changedProperties.has('skyboxOnly')) &&
           this[$shouldAttemptPreload]()) {
-        this[$updateEnvironment]();
+        if (!this.loaded && this.src == null && this.panoramaSource != null) {
+          void this[$updateSource]();
+        } else {
+          this[$updateEnvironment]();
+        }
       }
 
-      if (changedProperties.has('skyboxDofFocusMode') ||
+      if (changedProperties.has('skyboxDepthInvert') ||
+          changedProperties.has('skyboxDofFocusMode') ||
           changedProperties.has('skyboxDofFocus') ||
           changedProperties.has('skyboxDofStrength') ||
           changedProperties.has('skyboxDofMaxBlur') ||
           changedProperties.has('skyboxDofFocusSmoothing')) {
-        this[$scene].setSkyboxDofOptions({
-          focusMode: this.skyboxDofFocusMode,
-          focus: this.skyboxDofFocus,
-          strength: this.skyboxDofStrength,
-          maxBlur: this.skyboxDofMaxBlur,
-          focusSmoothing: this.skyboxDofFocusSmoothing
-        });
+        this.updateSkyboxDofOptions();
         this[$needsRender]();
       }
 
@@ -188,6 +218,71 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
         this[$scene].setGroundedSkybox();
         this[$needsRender]();
       }
+
+      if (changedProperties.has('skyboxImage') ||
+          changedProperties.has('skyboxDepthImage') ||
+          changedProperties.has('skyboxDofMaxBlur') ||
+          changedProperties.has('skyboxDofStrength') ||
+          changedProperties.has('withCredentials')) {
+        this.refreshSkyboxDepth();
+      }
+    }
+
+    private updateSkyboxDofOptions() {
+      this[$scene].setSkyboxDofOptions({
+        focusMode: this.skyboxDofFocusMode,
+        focus: this.skyboxDofFocus,
+        strength: this.skyboxDofStrength,
+        maxBlur: this.skyboxDofMaxBlur,
+        focusSmoothing: this.skyboxDofFocusSmoothing,
+        depthInvert: this.skyboxDepthInvert
+      });
+    }
+
+    private applySkyboxDepth() {
+      const request = this.depthRequest;
+      if (request != null && request.color === this.backgroundUrl &&
+          request.color === deserializeUrl(this.skyboxImage) &&
+          request.url === deserializeUrl(this.skyboxDepthImage) &&
+          request.credentials === this.withCredentials) {
+        this[$scene].setSkyboxDepth(this[$currentBackground], request.image);
+      }
+    }
+
+    private refreshSkyboxDepth() {
+      const url = deserializeUrl(this.skyboxDepthImage);
+      const previous = this.depthRequest;
+      if (!url || !this.skyboxImage || !this.isConnected ||
+          !this[$scene].skyboxDofEnabled) {
+        previous?.controller.abort();
+        this.depthRequest = null;
+        this[$scene].clearSkyboxDepth();
+        return;
+      }
+
+      const color = deserializeUrl(this.skyboxImage);
+      const credentials = this.withCredentials;
+      if (!color || !this[$renderer].canRender || !this[$shouldAttemptPreload]() ||
+          (previous?.color === color && previous.url === url &&
+           previous.credentials === credentials)) {
+        return;
+      }
+
+      previous?.controller.abort();
+      const controller = new AbortController();
+      const request: SkyboxDepthRequest = {
+        color, url, credentials, controller, image: null
+      };
+      this.depthRequest = request;
+      this.applySkyboxDepth();
+      void loadSkyboxDepth(url, credentials, controller.signal).then(image => {
+        if (this.depthRequest === request) {
+          request.image = image;
+          this.applySkyboxDepth();
+        }
+      }, () => {
+        // The color load is independent, including on HTTP or decode failure.
+      });
     }
 
     hasBakedShadow(): boolean {
@@ -218,11 +313,10 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     async[$updateEnvironment]() {
       const {skyboxImage, environmentImage} = this;
-
-      if (this[$cancelEnvironmentUpdate] != null) {
-        this[$cancelEnvironmentUpdate]!();
-        this[$cancelEnvironmentUpdate] = null;
-      }
+      const skyboxUrl = deserializeUrl(skyboxImage);
+      const request = ++this.environmentRequest;
+      this.updateSkyboxDofOptions();
+      this.refreshSkyboxDepth();
 
       const {textureUtils} = this[$renderer];
 
@@ -236,16 +330,18 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
       try {
         const {environmentMap, skybox} =
             await textureUtils.generateEnvironmentMapAndSkybox(
-                deserializeUrl(skyboxImage),
+                skyboxUrl,
                 environmentImage,
                 (progress: number) => updateEnvProgress(clamp(progress, 0, 1)),
                 this.withCredentials,
                 this.getSkyboxCacheKey(skyboxImage));
 
-        if (this[$currentEnvironmentMap] !== environmentMap) {
-          this[$currentEnvironmentMap] = environmentMap;
-          this.dispatchEvent(new CustomEvent('environment-change'));
+        if (request !== this.environmentRequest || skyboxImage !== this.skyboxImage ||
+            environmentImage !== this.environmentImage) {
+          return;
         }
+        const environmentChanged = this[$currentEnvironmentMap] !== environmentMap;
+        this[$currentEnvironmentMap] = environmentMap;
         if (skybox != null) {
           // When using the same environment and skybox, use the environment as
           // it gives HDR filtering.
@@ -255,17 +351,16 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
           this[$currentBackground] = null;
         }
 
-        this[$scene].setSkyboxDofOptions({
-          focusMode: this.skyboxDofFocusMode,
-          focus: this.skyboxDofFocus,
-          strength: this.skyboxDofStrength,
-          maxBlur: this.skyboxDofMaxBlur,
-          focusSmoothing: this.skyboxDofFocusSmoothing
-        });
         this[$scene].setEnvironmentAndSkybox(
             this[$currentEnvironmentMap], this[$currentBackground]);
+        this.backgroundUrl = skyboxUrl;
+        this.applySkyboxDepth();
+        if (environmentChanged) {
+          this.dispatchEvent(new CustomEvent('environment-change'));
+        }
       } catch (errorOrPromise) {
-        if (errorOrPromise instanceof Error) {
+        if (request === this.environmentRequest && skyboxImage === this.skyboxImage &&
+            environmentImage === this.environmentImage && errorOrPromise instanceof Error) {
           this[$scene].setEnvironmentAndSkybox(null, null);
           throw errorOrPromise;
         }

@@ -66,6 +66,39 @@ A completed drag writes `offset` and `scale` to the selected element and
 dispatches `extra-model-transform` with the element and the new values.
 Escape cancels the current drag. Source changes clear the selection.
 
+### Panorama depth of field
+
+```html
+<model-viewer skybox-only camera-controls
+  skybox-image="room.jpg"
+  skybox-depth-image="room-depth.png"
+  skybox-dof-focus-mode="manual"
+  skybox-dof-focus="0.35"
+  skybox-dof-max-blur="12">
+</model-viewer>
+```
+
+Supply a 2:1 equirectangular grayscale PNG, at up to 4096 × 2048, with the
+same framing and orientation as the color panorama. Both 8-bit and 16-bit
+samples are supported. Black is near and white is far. Use
+`skybox-depth-invert` for the opposite convention. When switching panoramas,
+set both image properties in the same update.
+
+Set the focus to a normalized value between 0 and 1 or use
+`skybox-dof-focus-mode="auto"` to focus at the center of the view. The radius is
+in CSS pixels, up to 32. Remove `skybox-depth-image` or set the radius to 0
+to display the sharp background and skip loading the depth map.
+
+In auto mode, focus follows the center of the camera view. For interactive
+focus, call `focusSkyboxAtPoint(event.clientX, event.clientY)` or
+`focusSkyboxOnHotspot('hotspot-chair')` on the viewer. Both methods set manual
+focus and return the normalized depth when the map is available.
+
+The effect applies to ungrounded backgrounds in the native WebGL renderer.
+HDR blur requires floating-point render targets. The bundled depth decoder
+uses a blob worker. Sites with a Content Security Policy that controls
+workers can enable it with `worker-src 'self' blob:`.
+
 ### NPM
 
 The `<model-viewer>` web component can be installed from [NPM](https://npmjs.org):

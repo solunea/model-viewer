@@ -20,6 +20,7 @@ import swc from '@rollup/plugin-swc';
 import terser from '@rollup/plugin-terser';
 import cleanup from 'rollup-plugin-cleanup';
 import dts from 'rollup-plugin-dts';
+import {rollup} from 'rollup';
 
 const {NODE_ENV} = process.env;
 
@@ -30,8 +31,43 @@ const onwarn = (warning, warn) => {
   }
 };
 
+const depthWorkerEntry = './lib/three-components/SkyboxDepthWorker.js';
+const depthWorker = {
+  name: 'inline-skybox-depth-worker',
+  async transform(code, id) {
+    if (!id.endsWith('/SkyboxDepth.js') && !id.endsWith('\\SkyboxDepth.js')) {
+      return null;
+    }
+    this.addWatchFile(depthWorkerEntry);
+    const build = await rollup({input: depthWorkerEntry, plugins: [resolve(), terser()]});
+    try {
+      const {output} = await build.generate({format: 'iife'});
+      const source = JSON.stringify(output[0].code);
+      const factory =
+          "return new Worker(new URL('./SkyboxDepthWorker.js', import.meta.url), { type: 'module' });";
+      if (!code.includes(factory)) {
+        this.error('Could not embed the panorama depth worker.');
+      }
+      return {
+        code: code.replace(
+            factory,
+            `const url = URL.createObjectURL(new Blob([${source}], {type: 'text/javascript'}));
+             try {
+               return new Worker(url, {type: 'module'});
+             } finally {
+               URL.revokeObjectURL(url);
+             }`),
+        map: null
+      };
+    } finally {
+      await build.close();
+    }
+  },
+};
+
 let commonPlugins = [
   resolve({dedupe: 'three'}),
+  depthWorker,
   replace({'Reflect.decorate': 'undefined', preventAssignment: true})
 ];
 
