@@ -1,7 +1,7 @@
 /* @license Copyright 2026 Solunea. Licensed under the Apache License,
  * Version 2.0. */
 import {BufferAttribute, BufferGeometry, ColorManagement, EquirectangularReflectionMapping, HalfFloatType, Matrix4, Mesh, NoBlending, RenderTarget, SRGBTransfer, Texture, Vector2} from 'three';
-import {Fn, If, Loop, asin, atan, clamp, dot, float, fract, int, length, max, min, mix, normalize, positionGeometry, select, smoothstep, step, texture, textureSize, uniform, uniformArray, uv, vec2, vec4, viewportUV} from 'three/tsl';
+import {Fn, If, Loop, asin, atan, clamp, dot, float, fract, int, length, max, min, mix, normalize, outputStruct, positionGeometry, property, select, smoothstep, step, texture, textureSize, uniform, uniformArray, uv, vec2, vec4, viewportUV} from 'three/tsl';
 import {NodeMaterial, QuadMesh, WebGPURenderer} from 'three/webgpu';
 import type {Node} from 'three/webgpu';
 
@@ -26,9 +26,9 @@ function passMaterial() {
 
 export class WebGPUSkyboxDof {
   private readonly projection = target('projectedColorAndRadius');
-  private readonly near = target('nearLayer');
-  private readonly far = target('farLayer');
-  private readonly layer = uniform(0);
+  private readonly layers = new RenderTarget(1, 1, {
+    count: 2, type: HalfFloatType, depthBuffer: false
+  });
   private readonly project = passMaterial();
   private readonly gather = passMaterial();
   private readonly composite = passMaterial();
@@ -117,8 +117,12 @@ export class WebGPUSkyboxDof {
       return vec4(color.div(dot(weight, vec4(1))), center);
     })();
 
+    const [nearTexture, farTexture] = this.layers.textures;
+    nearTexture.name = 'nearLayer';
+    farTexture.name = 'farLayer';
     const projected = texture(this.projection.texture);
-    this.gather.fragmentNode = Fn(() => {
+    const farOutput = property('vec4');
+    const nearOutput = Fn(() => {
       const screen = uv();
       const sample = projected.sample(screen).toVar();
       const radius = sample.a.mul(this.maxBlur);
@@ -136,11 +140,12 @@ export class WebGPUSkyboxDof {
         Loop({start: int(0), end: this.sampleCount, type: 'int'}, ({i}) => {
           const offset = this.offsets.element(i);
           const point = screen.add(offset.mul(this.maximumNear).mul(this.radiusScale));
-          const neighbor = projected.sample(point).a.mul(this.maxBlur).negate();
+          const sample = projected.sample(point).toVar();
+          const neighbor = sample.a.mul(this.maxBlur).negate();
           const overlap = smoothstep(footprint.negate(), footprint,
                                      neighbor.sub(this.maximumNear.mul(length(offset))));
           const weight = select(neighbor.greaterThan(.5), overlap.div(max(1, neighbor.mul(neighbor))), float(0));
-          near.addAssign(projected.sample(point).rgb.mul(weight));
+          near.addAssign(sample.rgb.mul(weight));
           nearWeight.addAssign(weight);
           coverage.addAssign(weight.mul(this.maximumNear.mul(this.maximumNear)).div(taps));
         });
@@ -151,20 +156,23 @@ export class WebGPUSkyboxDof {
         Loop({start: int(0), end: this.sampleCount, type: 'int'}, ({i}) => {
           const offset = this.offsets.element(i);
           const point = screen.add(offset.mul(search).mul(this.radiusScale));
-          const neighbor = projected.sample(point).a.mul(this.maxBlur);
+          const sample = projected.sample(point).toVar();
+          const neighbor = sample.a.mul(this.maxBlur);
           const weight = select(fill, smoothstep(-1.5, -.5, neighbor),
                                 step(.5, neighbor).mul(smoothstep(-1, 1, neighbor.sub(search.mul(length(offset))))));
-          far.addAssign(projected.sample(point).rgb.mul(weight));
+          far.addAssign(sample.rgb.mul(weight));
           farWeight.addAssign(weight);
         });
       });
-      return select(this.layer.lessThan(.5),
-                    vec4(near.mul(alpha.div(max(nearWeight, 1e-10))), alpha),
-                    vec4(far.div(max(farWeight, 1e-10)), step(1e-10, farWeight)));
+      farOutput.assign(vec4(far.div(max(farWeight, 1e-10)), step(1e-10, farWeight)));
+      return vec4(near.mul(alpha.div(max(nearWeight, 1e-10))), alpha);
     })();
+    // The far blur uses the near coverage. Write both results from that
+    // shared calculation while the projected samples are still available.
+    this.gather.fragmentNode = outputStruct(nearOutput, farOutput);
 
-    const nearLayer = texture(this.near.texture);
-    const farLayer = texture(this.far.texture);
+    const nearLayer = texture(nearTexture);
+    const farLayer = texture(farTexture);
     this.composite.fragmentNode = Fn(() => {
       const screen = viewportUV;
       const panorama = panoramaUV(vec2(screen.x, screen.y.oneMinus()));
@@ -197,8 +205,7 @@ export class WebGPUSkyboxDof {
     const workWidth = Math.max(1, Math.floor(paddedWidth * scale));
     const workHeight = Math.max(1, Math.floor(paddedHeight * scale));
     this.projection.setSize(workWidth, workHeight);
-    this.near.setSize(workWidth, workHeight);
-    this.far.setSize(workWidth, workHeight);
+    this.layers.setSize(workWidth, workHeight);
     this.cameraToSkybox.value.multiplyMatrices(
         this.skyboxRotation.makeRotationFromEuler(scene.backgroundRotation).transpose(),
         scene.camera.matrixWorld);
@@ -239,11 +246,7 @@ export class WebGPUSkyboxDof {
       this.quad.material = this.project;
       this.quad.render(renderer);
       this.quad.material = this.gather;
-      this.layer.value = 0;
-      renderer.setRenderTarget(this.near);
-      this.quad.render(renderer);
-      this.layer.value = 1;
-      renderer.setRenderTarget(this.far);
+      renderer.setRenderTarget(this.layers);
       this.quad.render(renderer);
       renderer.setRenderTarget(target);
       renderer.autoClear = autoClear;
@@ -264,8 +267,7 @@ export class WebGPUSkyboxDof {
   dispose() {
     this.background.geometry.dispose();
     this.projection.dispose();
-    this.near.dispose();
-    this.far.dispose();
+    this.layers.dispose();
     this.project.dispose();
     this.gather.dispose();
     this.composite.dispose();

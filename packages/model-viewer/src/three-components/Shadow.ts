@@ -629,15 +629,18 @@ export class Shadow extends Object3D {
       if (gpu != null) {
         gpu.setDepth(this.basicCamera, this.depthMaterial!.opacity);
         scene.background = null;
+        // Clear the attachment in the depth pass instead of submitting a
+        // separate pass to the WebGPU queue.
+        renderer.autoClear = true;
       } else {
         const state = (renderer as WebGLRenderer).state;
         state?.buffers.color.setMask(true);
         state?.buffers.depth.setMask(true);
+        renderer.clear();
+        renderer.autoClear = false;
       }
       scene.overrideMaterial = gpu?.depth ?? this.depthMaterial;
       this.floor.visible = false;
-      renderer.clear();
-      renderer.autoClear = false;
       renderer.render(scene, this.basicCamera);
       renderer.autoClear = initialAutoClear;
       this.blurShadow(renderer, gpu);
