@@ -14,6 +14,7 @@
  */
 
 import type {Camera, WebGLRenderer} from 'three';
+import type {WebGPURenderer} from 'three/webgpu';
 import {Object3D, Spherical, Vector4} from 'three';
 import {ViewHelper} from 'three/examples/jsm/helpers/ViewHelper.js';
 
@@ -63,7 +64,7 @@ export class ModelViewerViewHelper {
         new ViewHelper(camera, this.domElement as unknown as HTMLElement);
   }
 
-  render(renderer: WebGLRenderer, viewport: ViewHelperViewport) {
+  render(renderer: WebGLRenderer|WebGPURenderer, viewport: ViewHelperViewport) {
     const {renderedDpr} = viewport;
     this.viewport = {
       x: viewport.x / renderedDpr,
@@ -87,17 +88,23 @@ export class ModelViewerViewHelper {
     this.viewHelper.location.bottom = 0;
 
     const autoClear = renderer.autoClear;
+    const fromTop = 'isWebGPURenderer' in renderer;
+    const convertY = (y: number, height: number) =>
+        fromTop ? viewport.canvasHeight - y - height : y;
     renderer.getViewport(this.rendererViewport);
     renderer.autoClear = false;
     try {
       this.viewHelper.render({
         clearDepth: () => renderer.clearDepth(),
-        getViewport: (target: Vector4) =>
-            renderer.getViewport(target).divideScalar(renderedDpr),
+        getViewport: (target: Vector4) => {
+          renderer.getViewport(target);
+          target.y = convertY(target.y, target.w);
+          return target.divideScalar(renderedDpr);
+        },
         setViewport: (x: number, y: number, width: number, height: number) =>
             renderer.setViewport(
                 x * renderedDpr,
-                y * renderedDpr,
+                convertY(y * renderedDpr, height * renderedDpr),
                 width * renderedDpr,
                 height * renderedDpr),
         render: (scene: Object3D, camera: Camera) =>

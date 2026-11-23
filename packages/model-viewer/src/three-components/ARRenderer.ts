@@ -27,6 +27,7 @@ import {PlacementBox} from './PlacementBox.js';
 import {Renderer} from './Renderer.js';
 import {ChangeSource} from './SmoothControls.js';
 import {XRMenuPanel} from './XRMenuPanel.js';
+import type {WebGPUContext} from './WebGPU.js';
 
 // number of initial null pose XRFrames allowed before we post not-tracking
 const INIT_FRAMES = 30;
@@ -127,6 +128,12 @@ export type XRMode = typeof XRMode[keyof typeof XRMode];
 export class ARRenderer extends EventDispatcher<
     {status: {status: ARStatus}, tracking: {status: ARTracking}}> {
   public threeRenderer: WebGLRenderer;
+  private webGPUContext: WebGPUContext|null = null;
+  private webGPUXRRejected = false;
+
+  private get graphics() {
+    return this.webGPUContext?.renderer ?? this.threeRenderer;
+  }
   public currentSession: XRSession|null = null;
   public placeOnWall = false;
 
@@ -201,18 +208,29 @@ export class ARRenderer extends EventDispatcher<
   async resolveARSession(): Promise<XRSession> {
     assertIsArCandidate();
 
+    const useWebGPU = this.webGPUContext != null;
     const session: XRSession =
         await navigator.xr!.requestSession!('immersive-ar', {
-          requiredFeatures: [],
+          requiredFeatures: useWebGPU ? ['webgpu'] : [],
           optionalFeatures: ['hit-test', 'dom-overlay', 'light-estimation'],
           domOverlay: this.overlay ? {root: this.overlay} : undefined
         });
 
-    this.threeRenderer.xr.setReferenceSpaceType('local');
-
-    await this.threeRenderer.xr.setSession(session);
-
-    this.threeRenderer.xr.cameraAutoUpdate = false;
+    const renderer = this.graphics;
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType('local');
+    try {
+      await renderer.xr.setSession(session);
+      renderer.xr.cameraAutoUpdate = false;
+      if (useWebGPU) {
+        renderer.setAnimationLoop((time: number, frame?: XRFrame) => {
+          if (frame != null) this.onWebXRFrame(time, frame);
+        });
+      }
+    } catch (error) {
+      await session.end().catch(() => {});
+      throw error;
+    }
 
     return session;
   }
@@ -280,7 +298,28 @@ export class ARRenderer extends EventDispatcher<
       });
     }
 
-    const currentSession = await this.resolveARSession();
+    this.webGPUContext = this.webGPUXRRejected ? null :
+        this.renderer.webGPUForXR(scene, environmentEstimation);
+    let currentSession: XRSession;
+    try {
+      currentSession = await this.resolveARSession();
+    } catch (error) {
+      if (this.webGPUContext == null ||
+          (error as DOMException).name === 'NotAllowedError') {
+        throw error;
+      }
+      this.webGPUContext = null;
+      this.webGPUXRRejected = true;
+      if (navigator.userActivation?.isActive === false) {
+        this.overlay?.removeEventListener('beforexrselect', this.onBeforeXRSelect);
+        this.overlay = null;
+        this._presentedScene = null;
+        scene.setHotspotsVisibility(true);
+        scene.queueRender();
+        return;
+      }
+      currentSession = await this.resolveARSession();
+    }
 
     currentSession.addEventListener('end', () => {
       this.postSessionCleanup();
@@ -377,8 +416,8 @@ export class ARRenderer extends EventDispatcher<
     controller.addEventListener('selectend', this.onControllerSelectEnd);
   }
   private setupXRControllers() {
-    this.xrController1 = this.threeRenderer.xr.getController(0) as XRController;
-    this.xrController2 = this.threeRenderer.xr.getController(1) as XRController;
+    this.xrController1 = this.graphics.xr.getController(0) as XRController;
+    this.xrController2 = this.graphics.xr.getController(1) as XRController;
 
     this.setupController(this.xrController1);
     this.setupController(this.xrController2);
@@ -620,6 +659,8 @@ export class ARRenderer extends EventDispatcher<
   }
 
   private postSessionCleanup() {
+    this.webGPUContext?.renderer.setAnimationLoop(null);
+    this.webGPUContext = null;
     const session = this.currentSession;
     if (session != null) {
       session.removeEventListener('selectstart', this.onSelectStart);
@@ -738,7 +779,7 @@ export class ARRenderer extends EventDispatcher<
 
   private updateView(view: XRView) {
     const scene = this.presentedScene!;
-    const xr = this.threeRenderer.xr;
+    const xr = this.graphics.xr;
 
     xr.updateCamera(camera);
     scene.xrCamera = xr.getCamera();
@@ -755,11 +796,13 @@ export class ARRenderer extends EventDispatcher<
       const scale = view.recommendedViewportScale;
       view.requestViewportScale(Math.max(scale, MIN_VIEWPORT_SCALE));
     }
-    const layer = xr.getBaseLayer();
+    if (this.webGPUContext != null) return;
+    const webGLXR = this.threeRenderer.xr;
+    const layer = webGLXR.getBaseLayer();
     if (layer != null) {
       const viewport = layer instanceof XRWebGLLayer ?
           layer!.getViewport(view)! :
-          xr.getBinding().getViewSubImage(layer, view).viewport;
+          webGLXR.getBinding().getViewSubImage(layer, view).viewport;
       this.threeRenderer.setViewport(
           viewport.x, viewport.y, viewport.width, viewport.height);
     }
@@ -850,7 +893,7 @@ export class ARRenderer extends EventDispatcher<
   }
 
   private getHitPoint(hitResult: XRHitTestResult): Vector3|null {
-    const refSpace = this.threeRenderer.xr.getReferenceSpace()!;
+    const refSpace = this.graphics.xr.getReferenceSpace()!;
     const pose = hitResult.getPose(refSpace);
     if (pose == null) {
       return null;
@@ -1304,10 +1347,10 @@ export class ARRenderer extends EventDispatcher<
 
     const delta = time - this.lastTick!;
     this.applyXRInputToScene(delta);
-    this.renderer.preRender(this.presentedScene!, time, delta);
+    this.renderer.preRender(this.presentedScene!, time, delta, this.graphics);
     this.lastTick = time;
 
-    this.presentedScene!.renderShadow(this.threeRenderer);
+    this.presentedScene!.renderShadow(this.graphics, this.webGPUContext?.shadows);
   }
 
   /**
@@ -1324,7 +1367,7 @@ export class ARRenderer extends EventDispatcher<
     ++this.frames;
     // refSpace and pose are used to get the user's current position and
     // orientation in the XR session.
-    const refSpace = this.threeRenderer.xr.getReferenceSpace()!;
+    const refSpace = this.graphics.xr.getReferenceSpace()!;
     const pose = frame.getViewerPose(refSpace);
 
     // Tracking loss Detection.
@@ -1342,7 +1385,7 @@ export class ARRenderer extends EventDispatcher<
     // loaded.
     const scene = this.presentedScene;
     if (pose == null || scene == null || !scene.element.loaded) {
-      this.threeRenderer.clear();
+      this.graphics.clear();
       return;
     }
 
@@ -1352,6 +1395,14 @@ export class ARRenderer extends EventDispatcher<
     if (this.tracking === false) {
       this.tracking = true;
       this.dispatchEvent({type: 'tracking', status: ARTracking.TRACKING});
+    }
+
+    if (this.webGPUContext != null) {
+      this.updateView(pose.views[0]);
+      this.handleFirstView(frame, time);
+      this.webGPUContext.withScene(scene, () =>
+        this.graphics.render(scene, scene.getCamera()));
+      return;
     }
 
     // WebXR may return multiple views, i.e. for headset AR. This

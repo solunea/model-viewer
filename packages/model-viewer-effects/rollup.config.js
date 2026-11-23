@@ -30,32 +30,48 @@ const onwarn = (warning, warn) => {
   }
 };
 
-let plugins = [
+const plugins = [
   resolve(),
   replace({'Reflect.decorate': 'undefined', preventAssignment: true})
 ];
 
 const watchFiles = ['lib/**'];
+const effectEntry = './lib/model-viewer-effects.js';
+
+const gpuCompanion = minified => ({
+  name: 'model-viewer-effects-webgpu-companion',
+  resolveId(id, importer) {
+    if (id === './WebGPUEffects.js' && importer?.endsWith('effect-composer.js')) {
+      return {
+        id: minified ? './model-viewer-effects-webgpu.min.js' :
+                      './model-viewer-effects-webgpu.js',
+        external: true
+      };
+    }
+    return null;
+  }
+});
+
+function output(file, format, plugins, minified = false, gpu = false) {
+  return {
+    input: gpu ? './lib/WebGPUEffects.js' : effectEntry,
+    output: {
+      file: './dist/' + file,
+      sourcemap: true,
+      format,
+      name: 'ModelViewerEffects',
+      globals: {three: 'three'}
+    },
+    watch: {include: watchFiles},
+    plugins: gpu ? plugins : [gpuCompanion(minified), ...plugins],
+    external: gpu ? ['three', 'three/webgpu', 'three/tsl'] : ['three'],
+    onwarn
+  };
+}
 
 const outputOptions = [
-  {
-    input: './lib/model-viewer-effects.js',
-    output: {
-      file: './dist/model-viewer-effects.js',
-      sourcemap: true,
-      format: 'esm',
-      name: 'ModelViewerEffects',
-      globals: {
-        three: 'three',
-      },
-    },
-    watch: {
-      include: watchFiles,
-    },
-    plugins,
-    external: ['three'],
-    onwarn,
-  },
+  output('model-viewer-effects.js', 'esm', plugins),
+  output('model-viewer-effects-webgpu.js', 'esm', plugins, false, true)
 ];
 
 if (NODE_ENV !== 'development') {
@@ -73,64 +89,13 @@ if (NODE_ENV !== 'development') {
 
   // IE11 does not support modules, so they are removed here, as well as in a
   // dedicated unit test build which is needed for the same reason.
-  outputOptions.push({
-    input: './lib/model-viewer-effects.js',
-    output: {
-      file: './dist/model-viewer-effects-umd.js',
-      sourcemap: true,
-      format: 'umd',
-      name: 'ModelViewerEffects',
-      globals: {
-        three: 'three',
-      },
-    },
-    watch: {
-      include: watchFiles,
-    },
-    external: ['three'],
-    plugins: pluginsIE11,
-    onwarn,
-  });
-
-  plugins = [...plugins, terser()];
-
-  outputOptions.push({
-    input: './dist/model-viewer-effects.js',
-    output: {
-      file: './dist/model-viewer-effects.min.js',
-      sourcemap: true,
-      format: 'esm',
-      name: 'ModelViewerEffects',
-      globals: {
-        three: 'three',
-      },
-    },
-    watch: {
-      include: watchFiles,
-    },
-    external: ['three'],
-    plugins,
-    onwarn,
-  });
-
-  outputOptions.push({
-    input: './dist/model-viewer-effects-umd.js',
-    output: {
-      file: './dist/model-viewer-effects-umd.min.js',
-      sourcemap: true,
-      format: 'umd',
-      name: 'ModelViewerEffects',
-      globals: {
-        three: 'three',
-      },
-    },
-    watch: {
-      include: watchFiles,
-    },
-    external: ['three'],
-    plugins,
-    onwarn,
-  });
+  const minified = [...plugins, terser()];
+  outputOptions.push(
+      output('model-viewer-effects-umd.js', 'umd', pluginsIE11),
+      output('model-viewer-effects.min.js', 'esm', minified, true),
+      output('model-viewer-effects-webgpu.min.js', 'esm', minified, true, true),
+      output('model-viewer-effects-umd.min.js', 'umd',
+             [...pluginsIE11, terser()], true));
 
   outputOptions.push({
     input: './lib/model-viewer-effects.d.ts',
@@ -140,6 +105,7 @@ if (NODE_ENV !== 'development') {
       name: 'ModelViewerEffects',
     },
     plugins: [dts()],
+    external: ['three', 'three/webgpu', 'three/tsl'],
   });
 }
 

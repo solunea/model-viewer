@@ -30,11 +30,13 @@ export const PanoramaAreasMixin =
 
         connectedCallback() {
           super.connectedCallback();
+          this[$scene].panoramaAreas = this[$areas];
           this[$scene].add(this[$areas]);
           this[$sync]();
         }
 
         disconnectedCallback() {
+          this[$scene].panoramaAreas = null;
           this[$areas].dispose();
           super.disconnectedCallback();
         }

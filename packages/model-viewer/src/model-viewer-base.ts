@@ -23,6 +23,7 @@ import {makeTemplate} from './template.js';
 import {$evictionPolicy, CachingGLTFLoader} from './three-components/CachingGLTFLoader.js';
 import {ModelScene} from './three-components/ModelScene.js';
 import {ContextLostEvent, Renderer} from './three-components/Renderer.js';
+import type {WebGPUContext} from './three-components/WebGPU.js';
 import {clamp, debounce, deserializeUrl} from './utilities.js';
 import {ProgressTracker} from './utilities/progress-tracker.js';
 
@@ -67,6 +68,7 @@ export const $tick = Symbol('tick');
 export const $onModelLoad = Symbol('onModelLoad');
 export const $onResize = Symbol('onResize');
 export const $renderer = Symbol('renderer');
+export const $setRenderBackend = Symbol('setRenderBackend');
 export const $progressTracker = Symbol('progressTracker');
 export const $getLoaded = Symbol('getLoaded');
 export const $getModelIsVisible = Symbol('getModelIsVisible');
@@ -120,6 +122,9 @@ export interface Camera {
   projectionMatrix: Array<number>;
 }
 
+export type RenderBackend = 'webgl'|'webgpu';
+export type RenderBackendPreference = 'auto'|'webgl';
+
 export interface EffectComposerInterface {
   setRenderer(renderer: WebGLRenderer): void;
   setMainScene(scene: ModelScene): void;
@@ -127,12 +132,19 @@ export interface EffectComposerInterface {
   setSize(width: number, height: number): void;
   beforeRender(time: DOMHighResTimeStamp, delta: DOMHighResTimeStamp): void;
   render(deltaTime?: DOMHighResTimeStamp): void;
+  supportsWebGPU?(): boolean;
+  prepareWebGPU?(context: WebGPUContext): Promise<void>;
+  renderWebGPU?(deltaTime: number): void;
 }
 
 export interface RendererInterface {
   load(progressCallback: (progress: number) => void): Promise<FramingInfo>;
   render(camera: Camera): void;
   resize(width: number, height: number): void;
+  prepareRenderBackend?(
+      context: WebGPUContext|null, onError: (error: unknown) => void):
+      Promise<void>;
+  captureCanvas?(): HTMLCanvasElement|null;
 }
 
 /**
@@ -188,6 +200,24 @@ export default class ModelViewerElementBase extends ReactiveElement {
 
   @property({type: Boolean, attribute: 'view-helper'})
   viewHelper = false;
+
+  @property({type: String, attribute: 'render-backend', reflect: true})
+  renderBackend: RenderBackendPreference = 'auto';
+
+  private renderedBackend: RenderBackend|null = null;
+
+  get activeRenderBackend(): RenderBackend|null {
+    return this.renderedBackend;
+  }
+
+  [$setRenderBackend](backend: RenderBackend) {
+    if (this.renderedBackend !== backend) {
+      this.renderedBackend = backend;
+      this.dispatchEvent(new CustomEvent('render-backend-change', {
+        detail: {backend}
+      }));
+    }
+  }
 
   protected[$isElementInViewport] = false;
   protected[$loaded] = false;
@@ -507,6 +537,11 @@ export default class ModelViewerElementBase extends ReactiveElement {
     if (changedProperties.has('viewHelper')) {
       this[$needsRender]();
     }
+
+    if (this.isConnected &&
+        (changedProperties.has('renderBackend') || changedProperties.has('src'))) {
+      this[$renderer].updateBackend(this[$scene]);
+    }
   }
 
   /** @export */
@@ -580,6 +615,7 @@ export default class ModelViewerElementBase extends ReactiveElement {
     effectComposer.setMainCamera(this[$scene].getCamera());
     effectComposer.setMainScene(this[$scene]);
     this[$scene].effectRenderer = effectComposer;
+    this[$renderer].updateBackend(this[$scene]);
   }
 
   /**
@@ -587,14 +623,17 @@ export default class ModelViewerElementBase extends ReactiveElement {
    */
   unregisterEffectComposer() {
     this[$scene].effectRenderer = null;
+    this[$renderer].updateBackend(this[$scene]);
   }
 
   registerRenderer(renderer: RendererInterface) {
     this[$scene].externalRenderer = renderer;
+    this[$renderer].updateBackend(this[$scene]);
   }
 
   unregisterRenderer() {
     this[$scene].externalRenderer = null;
+    this[$renderer].updateBackend(this[$scene]);
   }
 
   get[$ariaLabel]() {

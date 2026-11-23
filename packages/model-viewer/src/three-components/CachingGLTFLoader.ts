@@ -14,6 +14,8 @@
  */
 
 import {EventDispatcher, Texture, WebGLRenderer} from 'three';
+import type {WebGPURenderer} from 'three/webgpu';
+import type {KTX2LoaderWorkerConfig} from 'three/examples/jsm/loaders/KTX2Loader.js';
 import {MeshoptDecoder} from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import {DRACOLoader} from 'three/examples/jsm/loaders/DRACOLoader.js';
 import {GLTF, GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -109,8 +111,16 @@ export class CachingGLTFLoader<T extends GLTFInstanceConstructor =
     return meshoptDecoderLocation;
   }
 
-  static initializeKTX2Loader(renderer: WebGLRenderer) {
-    ktx2Loader.detectSupport(renderer);
+  static initializeKTX2Loader(webgl: WebGLRenderer, webgpu?: WebGPURenderer) {
+    if (ktx2Loader.transcoderPending != null) return;
+    ktx2Loader.detectSupport(webgl);
+    if (webgpu != null) {
+      const gpuFormats = new KTX2Loader().detectSupport(webgpu).workerConfig;
+      const formats = ktx2Loader.workerConfig;
+      for (const key of Object.keys(formats) as Array<keyof KTX2LoaderWorkerConfig>) {
+        formats[key] = formats[key] && gpuFormats[key];
+      }
+    }
   }
 
   static[$evictionPolicy]: CacheEvictionPolicy =
@@ -156,7 +166,9 @@ export class CachingGLTFLoader<T extends GLTFInstanceConstructor =
     return !!preloaded.get(url);
   }
 
-  constructor(GLTFInstance: T) {
+  constructor(
+      GLTFInstance: T,
+      private readonly prepareTextures: () => Promise<unknown>|null = () => null) {
     super();
     this[$GLTFInstance] = GLTFInstance;
     this[$loader].setDRACOLoader(dracoLoader);
@@ -178,17 +190,19 @@ export class CachingGLTFLoader<T extends GLTFInstanceConstructor =
   async preload(
       url: string, element: ModelViewerElementBase,
       progressCallback: ProgressCallback = () => {}) {
-    this[$loader].setWithCredentials(element.withCredentials);
     this.dispatchEvent({type: 'preload', element: element, src: url});
     if (!cache.has(url)) {
-      if (meshoptDecoder != null) {
-        this[$loader].setMeshoptDecoder(await meshoptDecoder);
-      }
-
-      const rawGLTFLoads =
-          loadWithLoader(url, this[$loader], (progress: number) => {
-            progressCallback(progress * 0.8);
-          });
+      const rawGLTFLoads = (async () => {
+        const pendingTextures = this.prepareTextures();
+        if (pendingTextures != null) await pendingTextures;
+        if (meshoptDecoder != null) {
+          this[$loader].setMeshoptDecoder(await meshoptDecoder);
+        }
+        this[$loader].setWithCredentials(element.withCredentials);
+        return loadWithLoader(url, this[$loader], progress => {
+          progressCallback(progress * 0.8);
+        });
+      })();
 
       const GLTFInstance = this[$GLTFInstance];
       const gltfInstanceLoads = rawGLTFLoads

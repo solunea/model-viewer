@@ -96,7 +96,7 @@ export class CorrelatedSceneGraph {
 
       for (const mapping in gltfMappings) {
         if (mapping != null && mapping !== 'primitives') {
-          const type = mapping as GLTFReferenceType;
+          const type = mapping as Exclude<GLTFReferenceType, 'primitives'>;
           const elementArray = gltf[type] || [];
           const gltfElement = elementArray[gltfMappings[type]!];
           if (gltfElement == null) {
@@ -149,7 +149,8 @@ export class CorrelatedSceneGraph {
 
             for (const mapping in elementReference) {
               if (mapping != null && mapping !== 'primitives') {
-                const type = mapping as GLTFReferenceType;
+                const type =
+                    mapping as Exclude<GLTFReferenceType, 'primitives'>;
                 const index = elementReference[type]!;
                 const cloneElement = cloneGLTF[type]![index];
 

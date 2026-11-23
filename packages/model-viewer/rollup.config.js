@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+import {readFileSync} from 'node:fs';
+
 import commonjs from '@rollup/plugin-commonjs';
 import {nodeResolve as resolve} from '@rollup/plugin-node-resolve';
 import replace from '@rollup/plugin-replace';
@@ -65,16 +67,53 @@ const depthWorker = {
   },
 };
 
+// These Three.js URLs are relative to the loader modules before bundling.
+// Resolve them at build time so the viewer can also be imported from a blob URL.
+const threeVersion = JSON.parse(readFileSync(
+    new URL('./package.json', import.meta.url), 'utf8')).peerDependencies.three;
+const threeLoaders =
+    `https://cdn.jsdelivr.net/npm/three@${threeVersion}/examples/jsm/loaders/`;
+const decoderUrls = {
+  name: 'three-decoder-urls',
+  transform(code, id) {
+    if (!/[\\/]three[\\/]examples[\\/]jsm[\\/]loaders[\\/](DRACO|KTX2)Loader\.js$/.test(id)) {
+      return null;
+    }
+    return {
+      code: code.replace(
+          /new URL\(\s*(['"])(\.\.\/libs\/(?:draco|basis)\/[^'"]+)\1\s*,\s*import\.meta\.url\s*\)\.toString\(\)/g,
+          (_match, _quote, path) => JSON.stringify(new URL(path, threeLoaders).href)),
+      map: null
+    };
+  }
+};
+
 let commonPlugins = [
   resolve({dedupe: 'three'}),
   depthWorker,
+  decoderUrls,
   replace({'Reflect.decorate': 'undefined', preventAssignment: true})
 ];
 
 const watchFiles = ['lib/**'];
+const gpuEntry = './lib/three-components/WebGPU.js';
+const gpuExternal = ['three', 'three/webgpu', 'three/tsl'];
+
+function gpuCompanion(file) {
+  return {
+    name: 'model-viewer-webgpu-companion',
+    resolveId(id, importer) {
+      if (id === './WebGPU.js' && importer?.endsWith('Renderer.js')) {
+        return {id: file, external: true};
+      }
+      return null;
+    }
+  };
+}
 
 const createModelViewerOutput =
-    (file, format, plugins = commonPlugins, external = []) => {
+    (file, format, plugins = commonPlugins, external = [],
+     input = './lib/model-viewer.js') => {
       const globals = external.reduce((acc, mod) => {
         acc[mod] =
             mod;  // Assuming global variable names are the same as module names
@@ -82,10 +121,11 @@ const createModelViewerOutput =
       }, {});
 
       return {
-        input: './lib/model-viewer.js',
+        input,
         output: {
           file,
           format,
+          inlineDynamicImports: true,
           sourcemap: true,
           name: 'ModelViewerElement',
           globals
@@ -100,7 +140,12 @@ const createModelViewerOutput =
 const outputOptions = [
   createModelViewerOutput('./dist/model-viewer.js', 'esm'),
   createModelViewerOutput(
-      './dist/model-viewer-module.js', 'esm', commonPlugins, ['three'])
+      './dist/model-viewer-module.js', 'esm',
+      [gpuCompanion('./model-viewer-webgpu-module.js'), ...commonPlugins],
+      ['three']),
+  createModelViewerOutput(
+      './dist/model-viewer-webgpu-module.js', 'esm', commonPlugins, gpuExternal,
+      gpuEntry)
 ];
 
 if (NODE_ENV !== 'development') {
@@ -122,7 +167,9 @@ if (NODE_ENV !== 'development') {
       createModelViewerOutput('./dist/model-viewer-umd.js', 'umd', pluginsIE11),
       /** Bundled w/o three */
       createModelViewerOutput(
-          './dist/model-viewer-module-umd.js', 'umd', pluginsIE11, ['three']));
+          './dist/model-viewer-module-umd.js', 'umd',
+          [gpuCompanion('./model-viewer-webgpu-module.js'), ...pluginsIE11],
+          ['three']));
 
   // Minified Versions
   const minifiedPlugins = [...commonPlugins, terser()];
@@ -135,12 +182,15 @@ if (NODE_ENV !== 'development') {
       createModelViewerOutput(
           './dist/model-viewer-module.min.js',
           'esm',
-          minifiedPlugins,
+          [gpuCompanion('./model-viewer-webgpu-module.min.js'), ...minifiedPlugins],
           ['three']),
       createModelViewerOutput(
-          './dist/model-viewer-module-umd.min.js', 'umd', minifiedPlugins, [
-            'three'
-          ]));
+          './dist/model-viewer-webgpu-module.min.js', 'esm', minifiedPlugins,
+          gpuExternal, gpuEntry),
+      createModelViewerOutput(
+          './dist/model-viewer-module-umd.min.js', 'umd',
+          [gpuCompanion('./model-viewer-webgpu-module.min.js'), ...minifiedPlugins],
+          ['three']));
 
   outputOptions.push({
     input: './lib/model-viewer.d.ts',
@@ -150,6 +200,7 @@ if (NODE_ENV !== 'development') {
       name: 'ModelViewerElement',
     },
     plugins: [dts()],
+    external: gpuExternal,
   });
 }
 

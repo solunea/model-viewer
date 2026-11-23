@@ -243,7 +243,7 @@ function makeMaterial(
   });
 }
 
-function rings(
+export function rings(
     outerCount: number, middleCount: number, innerCount: number): Vector2[] {
   const offsets: Vector2[] = [];
   for (const [count, radius, rotation] of [
@@ -430,9 +430,8 @@ export class SkyboxDof {
 
     const camera = scene.camera;
     camera.updateWorldMatrix(true, false);
-    const {x, y, z, order} = scene.backgroundRotation;
     this.skyboxRotation.makeRotationFromEuler(
-        this.skyboxEuler.set(-x, -y, -z, order));
+        this.skyboxEuler.copy(scene.backgroundRotation)).transpose();
     this.common.cameraToSkybox.value.multiplyMatrices(
         this.skyboxRotation, camera.matrixWorld);
     this.common.projectionInverse.value.copy(camera.projectionMatrixInverse);

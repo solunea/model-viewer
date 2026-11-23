@@ -31,6 +31,10 @@ const DUMMY_RENDERER = {
 import {IMVEffect, IntegrationOptions, MVEffectBase} from './effects/mixins/effect-base.js';
 import {disposeEffectPass, getOwnPropertySymbolValue, isConvolution, validateLiteralType} from './utilities.js';
 import {Renderer} from '@solunea/model-viewer/lib/three-components/Renderer.js';
+import type {WebGPUContext} from '@solunea/model-viewer/lib/three-components/WebGPU.js';
+import type {WebGPURenderer} from 'three/webgpu';
+import type {EffectElement, WebGPUEffects} from './WebGPUEffects.js';
+import type {WebGPUJFASettings} from './WebGPUJFA.js';
 
 export const $scene = Symbol('scene');
 export const $composer = Symbol('composer');
@@ -56,6 +60,9 @@ export class EffectComposer extends PPEffectComposer {
   public camera?: Camera;
   public scene?: ModelScene;
   public dirtyRender?: boolean;
+  public webGPUHost?: MVEffectComposer;
+  private gpu?: WebGPUEffects;
+  private gpuRenderer?: WebGPURenderer;
 
   [$tonemapping]: ToneMapping = NeutralToneMapping;
 
@@ -128,9 +135,50 @@ export class EffectComposer extends PPEffectComposer {
       this.scene?.queueRender();
     }
   }
+
+  supportsWebGPU() {
+    return this.webGPUHost != null &&
+        this.webGPUHost.userPasses.every(pass =>
+            !pass.enabled || pass.getWebGPUJFA != null);
+  }
+
+  prepareWebGPU(context: WebGPUContext) {
+    return this.prepareWebGPUFor(context.renderer);
+  }
+
+  async prepareWebGPUFor(renderer: WebGPURenderer) {
+    if (this.gpuRenderer === renderer) return;
+    const {WebGPUEffects} = await import('./WebGPUEffects.js');
+    this.gpu?.dispose();
+    this.gpu = new WebGPUEffects(renderer);
+    this.gpuRenderer = renderer;
+  }
+
+  renderWebGPU(_delta?: number) {
+    const host = this.webGPUHost;
+    if (host == null || this.scene == null || this.camera == null ||
+        this.gpu == null) return;
+    this.gpu.render(this.scene, this.camera, {
+      quality: host.renderMode === 'quality',
+      samples: host.msaa,
+      effects: Array.from(host.children).filter(
+          element => (element as MVEffectBase).effects?.length > 0) as EffectElement[],
+      custom: host.userPasses.filter(pass => pass.enabled)
+                  .flatMap(pass => pass.getWebGPUJFA ? [pass.getWebGPUJFA()] : [])
+    });
+  }
+
+  override dispose() {
+    this.gpu?.dispose();
+    this.gpu = undefined;
+    this.gpuRenderer = undefined;
+    super.dispose();
+  }
 }
 
-export type MVPass = Pass&IntegrationOptions;
+export type MVPass = Pass&IntegrationOptions&{
+  getWebGPUJFA?(): WebGPUJFASettings
+};
 
 export const RENDER_MODES = ['performance', 'quality'] as const;
 export type RenderMode = typeof RENDER_MODES[number];
@@ -245,6 +293,7 @@ export class MVEffectComposer extends ReactiveElement {
       frameBufferType: this.renderMode === 'quality' ? HalfFloatType :
                                                        UnsignedByteType,
     });
+    this[$composer].webGPUHost = this;
     this.modelViewerElement.registerEffectComposer(this[$effectComposer]);
     this[$effectComposer].addPass(this[$renderPass], 0);
     this[$effectComposer].addPass(this[$normalPass], 1);

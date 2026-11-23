@@ -1,10 +1,12 @@
+/// <reference types="@webgpu/types" />
 import * as three from 'three';
-import { Object3D, Material as Material$4, Texture as Texture$4, Group, Vector3 as Vector3$1, Mesh as Mesh$1, WebGLRenderer, Scene as Scene$1, AnimationActionLoopStyles, PerspectiveCamera as PerspectiveCamera$1, Camera as Camera$2, Box3, Sphere, ToneMapping, Vector2, DataTexture, AnimationMixerEventMap, Intersection, XRTargetRaySpace, Matrix4 as Matrix4$1, EventDispatcher, Event as Event$1, MeshPhysicalMaterial } from 'three';
+import { Object3D, Material as Material$4, Texture as Texture$4, Group, Vector3 as Vector3$1, Mesh as Mesh$1, OrthographicCamera as OrthographicCamera$1, DirectionalLight, WebGLRenderer, Scene as Scene$1, DataTexture, Color, Vector2, Vector4, AnimationActionLoopStyles, PerspectiveCamera as PerspectiveCamera$1, Camera as Camera$2, Box3, Sphere, ToneMapping, AnimationMixerEventMap, Intersection, XRTargetRaySpace, Matrix4 as Matrix4$1, EventDispatcher, Event as Event$1, MeshPhysicalMaterial } from 'three';
 export { CanvasTexture, FileLoader, Loader, NearestFilter } from 'three';
 import * as three_examples_jsm_loaders_GLTFLoader_js from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTF as GLTF$2, GLTFReference, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ReactiveElement } from 'lit';
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
+import { WebGPURenderer } from 'three/webgpu';
 
 type RGB$1 = [number, number, number];
 type RGBA$1 = [number, number, number, number];
@@ -885,6 +887,14 @@ declare class Hotspot extends CSS2DObject {
 }
 
 type Side = 'back' | 'bottom';
+interface WebGPUShadowMaterials {
+    depth: Material$4;
+    blur: Material$4;
+    setDepth(camera: OrthographicCamera$1, opacity: number): void;
+    setBlur(source: Texture$4, x: number, y: number): void;
+    setPCSS(light: DirectionalLight, lightSize: number, nearPlane: number): void;
+    withPCSSShadow(light: DirectionalLight, render: () => void): void;
+}
 /**
  * Dual-mode shadow:
  * - 'basic' (default): Orthographic camera + depth + gaussian blur. Very fast.
@@ -893,6 +903,7 @@ type Side = 'back' | 'bottom';
  * Mode is auto-selected: basic when orbit is (0,0), pcss when orbit is non-zero.
  */
 declare class Shadow extends Object3D {
+    private lastRenderer;
     private mode;
     private floor;
     private intensity;
@@ -933,9 +944,10 @@ declare class Shadow extends Object3D {
     getIntensity(): number;
     setOffset(offset: number): void;
     gap(): number;
-    render(renderer: WebGLRenderer, scene: Scene$1): void;
+    render(renderer: WebGLRenderer | WebGPURenderer, scene: Scene$1, gpu?: WebGPUShadowMaterials): void;
     invalidateCastShadow(): void;
     dispose(): void;
+    withWebGPUShadow(materials: WebGPUShadowMaterials, render: () => void): void;
     private setupBasicScene;
     private updateBasicSoftness;
     private setMapSize;
@@ -945,6 +957,63 @@ declare class Shadow extends Object3D {
     private updatePCSSLightPosition;
     private updatePCSSPatch;
     private renderPCSS;
+}
+
+interface PanoramaAreaDefinition {
+    readonly name: string;
+    readonly mask: {
+        readonly width: number;
+        readonly height: number;
+        readonly bounds: {
+            readonly x: number;
+            readonly y: number;
+            readonly width: number;
+            readonly height: number;
+        };
+        /** Row-major, least significant bit first, relative to bounds. */
+        readonly bits: Uint8Array;
+    };
+}
+interface PanoramaAreaHit {
+    name: string;
+    u: number;
+    v: number;
+}
+interface PanoramaAreaMaterial {
+    material: Material$4;
+    update(mask: DataTexture, progress: number): void;
+}
+type CreatePanoramaAreaMaterial = (mask: DataTexture, color: Color, dimensions: Vector2, bounds: Vector4) => PanoramaAreaMaterial;
+/** Internal scene-root overlay. Never added to the exportable model target. */
+declare class PanoramaAreas extends Group {
+    private scene;
+    private textureLimit;
+    private areas;
+    private highlighted;
+    private mesh;
+    private webglMaterial;
+    private webgpuMaterial;
+    private texture;
+    private uploaded;
+    private active;
+    private capturing;
+    private highlightColor;
+    private shineEnabled;
+    private shineArea;
+    private shineStart;
+    private shineProgress;
+    constructor(scene: ModelScene, textureLimit?: number);
+    setAreas(areas: readonly PanoramaAreaDefinition[]): void;
+    setHighlight(name: string | null, color?: string): void;
+    setShine(enabled: boolean): void;
+    tick(time: number): void;
+    setActive(active: boolean): void;
+    setCapturing(capturing: boolean): void;
+    fromPoint(clientX: number, clientY: number): PanoramaAreaHit | null;
+    private update;
+    withMaterial(createMaterial: CreatePanoramaAreaMaterial, render: () => void): void;
+    private releaseGraphics;
+    dispose(): void;
 }
 
 interface SkyboxDepthImage {
@@ -1016,9 +1085,10 @@ declare class ModelScene extends Scene$1 {
     idealAspect: number;
     framedFoVDeg: number;
     shadow: Shadow | null;
+    panoramaAreas: PanoramaAreas | null;
     shadowIntensity: number;
     shadowSoftness: number;
-    bakedShadows: Set<Mesh$1<three.BufferGeometry<three.NormalBufferAttributes, three.BufferGeometryEventMap>, Material$4 | Material$4[], three.Object3DEventMap>>;
+    bakedShadows: Set<Mesh$1<three.BufferGeometry<three.NormalBufferAttributes, three.BufferGeometryEventMap>, Material$4<three.MaterialEventMap> | Material$4<three.MaterialEventMap>[], three.Object3DEventMap>>;
     exposure: number;
     toneMapping: ToneMapping;
     canScale: boolean;
@@ -1223,7 +1293,7 @@ declare class ModelScene extends Scene$1 {
      * shape has changed (not a rotation about the Y axis).
      */
     updateShadow(): void;
-    renderShadow(renderer: WebGLRenderer): void;
+    renderShadow(renderer: WebGLRenderer | WebGPURenderer, gpu?: WebGPUShadowMaterials): void;
     private queueShadowRender;
     /**
      * Sets the shadow's intensity, lazily creating the shadow as necessary.
@@ -1336,6 +1406,9 @@ declare class ARRenderer extends EventDispatcher<{
 }> {
     private renderer;
     threeRenderer: WebGLRenderer;
+    private webGPUContext;
+    private webGPUXRRejected;
+    private get graphics();
     currentSession: XRSession | null;
     placeOnWall: boolean;
     private placementBox;
@@ -1549,13 +1622,14 @@ declare class CachingGLTFLoader<T extends GLTFInstanceConstructor = GLTFInstance
         src: String;
     };
 }> {
+    private readonly prepareTextures;
     static setDRACODecoderLocation(url: string): void;
     static getDRACODecoderLocation(): string;
     static setKTX2TranscoderLocation(url: string): void;
     static getKTX2TranscoderLocation(): string;
     static setMeshoptDecoderLocation(url: string): void;
     static getMeshoptDecoderLocation(): string;
-    static initializeKTX2Loader(renderer: WebGLRenderer): void;
+    static initializeKTX2Loader(webgl: WebGLRenderer, webgpu?: WebGPURenderer): void;
     static [$evictionPolicy]: CacheEvictionPolicy;
     static get cache(): Map<string, Promise<GLTFInstance>>;
     /** @nocollapse */
@@ -1568,7 +1642,7 @@ declare class CachingGLTFLoader<T extends GLTFInstanceConstructor = GLTFInstance
      * available in our local cache.
      */
     static hasFinishedLoading(url: string): boolean;
-    constructor(GLTFInstance: T);
+    constructor(GLTFInstance: T, prepareTextures?: () => Promise<unknown> | null);
     protected [$loader]: GLTFLoader;
     protected [$GLTFInstance]: T;
     protected get [$evictionPolicy](): CacheEvictionPolicy;
@@ -1585,12 +1659,40 @@ declare class CachingGLTFLoader<T extends GLTFInstanceConstructor = GLTFInstance
     load(url: string, element: ModelViewerElementBase, progressCallback?: ProgressCallback): Promise<InstanceType<T>>;
 }
 
+declare class WebGPUContext {
+    readonly renderer: WebGPURenderer;
+    readonly canvas: HTMLCanvasElement;
+    private readonly onLost;
+    readonly shadows: WebGPUShadowMaterials;
+    private skyboxDof;
+    private readonly pmrem;
+    private readonly environments;
+    private readonly device;
+    private readonly onGPUError;
+    get hasSkyboxDof(): boolean;
+    private constructor();
+    static create(powerPreference: string, onLost: () => void): Promise<WebGPUContext | null>;
+    /**
+     * External renderers own their presentation canvases. Share the GPU device
+     * with those renderers so they follow the same device-loss lifecycle.
+     */
+    createRenderer(canvas: HTMLCanvasElement, antialias?: boolean): Promise<WebGPURenderer>;
+    loadGainMap(url: string, withCredentials: boolean, onProgress: (event: ProgressEvent) => void): Promise<three.DataTexture>;
+    private environment;
+    withEnvironment(scene: Scene$1, render: () => void): void;
+    withScene(scene: ModelScene, render: () => void): void;
+    render(scene: ModelScene, width: number, height: number): void;
+    releaseSkyboxDof(): void;
+    dispose(): void;
+}
+
 interface EnvironmentMapAndSkybox {
     environmentMap: Texture$4;
     skybox: Texture$4 | null;
 }
 declare class TextureUtils {
     private threeRenderer;
+    private readonly readyWebGPU;
     lottieLoaderUrl: string;
     private _ldrLoader;
     private _imageLoader;
@@ -1603,7 +1705,7 @@ declare class TextureUtils {
     private blurMaterial;
     private blurScene;
     private blurTempTarget;
-    constructor(threeRenderer: WebGLRenderer);
+    constructor(threeRenderer: WebGLRenderer, readyWebGPU?: () => Promise<WebGPUContext | null> | null);
     private ldrLoader;
     private imageLoader;
     private hdrLoader;
@@ -1670,6 +1772,7 @@ declare class Renderer extends EventDispatcher<{
         sourceEvent: WebGLContextEvent;
     };
 }> {
+    private readonly options;
     private static _singleton;
     static get singleton(): Renderer;
     static resetSingleton(): void;
@@ -1690,6 +1793,14 @@ declare class Renderer extends EventDispatcher<{
     private avgFrameDuration;
     private viewHelpers;
     private skyboxDof;
+    private gpu;
+    private gpuProbe;
+    private gpuPending;
+    private gpuUnavailable;
+    private disposed;
+    private readonly failedGPUScenes;
+    private readonly gpuEffects;
+    private readonly externalBackends;
     get canRender(): boolean;
     get scaleFactor(): number;
     set minScale(scale: number);
@@ -1697,6 +1808,14 @@ declare class Renderer extends EventDispatcher<{
     registerScene(scene: ModelScene): void;
     unregisterScene(scene: ModelScene): void;
     displayCanvas(scene: ModelScene): HTMLCanvasElement;
+    private wantsWebGPU;
+    updateBackend(scene: ModelScene): void;
+    private probeWebGPU;
+    prepareExternalRenderer(scene: ModelScene, external: RendererInterface): Promise<void>;
+    private prepareExternalBackend;
+    private fallbackScene;
+    private handleDeviceLoss;
+    webGPUForXR(scene: ModelScene, environmentEstimation: boolean): WebGPUContext | null;
     /**
      * The function enables an optimization, where when there is only a single
      * <model-viewer> element, we can use the renderer's 3D canvas directly for
@@ -1729,7 +1848,7 @@ declare class Renderer extends EventDispatcher<{
      * This method takes care of updating the element and renderer state based on
      * the time that has passed since the last rendered frame.
      */
-    preRender(scene: ModelScene, t: number, delta: number): void;
+    preRender(scene: ModelScene, t: number, delta: number, renderer?: WebGLRenderer | WebGPURenderer): void;
     render(t: number, frame?: XRFrame, forceScene?: ModelScene): void;
     private releaseUnusedSkyboxDof;
     dispose(): Array<ModelViewerElementBase>;
@@ -1821,6 +1940,7 @@ declare const $tick: unique symbol;
 declare const $onModelLoad: unique symbol;
 declare const $onResize: unique symbol;
 declare const $renderer: unique symbol;
+declare const $setRenderBackend: unique symbol;
 declare const $progressTracker: unique symbol;
 declare const $getLoaded: unique symbol;
 declare const $getModelIsVisible: unique symbol;
@@ -1849,6 +1969,8 @@ interface Camera {
     viewMatrix: Array<number>;
     projectionMatrix: Array<number>;
 }
+type RenderBackend = 'webgl' | 'webgpu';
+type RenderBackendPreference = 'auto' | 'webgl';
 interface EffectComposerInterface {
     setRenderer(renderer: WebGLRenderer): void;
     setMainScene(scene: ModelScene): void;
@@ -1856,11 +1978,16 @@ interface EffectComposerInterface {
     setSize(width: number, height: number): void;
     beforeRender(time: DOMHighResTimeStamp, delta: DOMHighResTimeStamp): void;
     render(deltaTime?: DOMHighResTimeStamp): void;
+    supportsWebGPU?(): boolean;
+    prepareWebGPU?(context: WebGPUContext): Promise<void>;
+    renderWebGPU?(deltaTime: number): void;
 }
 interface RendererInterface {
     load(progressCallback: (progress: number) => void): Promise<FramingInfo>;
     render(camera: Camera): void;
     resize(width: number, height: number): void;
+    prepareRenderBackend?(context: WebGPUContext | null, onError: (error: unknown) => void): Promise<void>;
+    captureCanvas?(): HTMLCanvasElement | null;
 }
 /**
  * Definition for a basic <model-viewer> element.
@@ -1885,6 +2012,10 @@ declare class ModelViewerElementBase extends ReactiveElement {
      */
     generateSchema: boolean;
     viewHelper: boolean;
+    renderBackend: RenderBackendPreference;
+    private renderedBackend;
+    get activeRenderBackend(): RenderBackend | null;
+    [$setRenderBackend](backend: RenderBackend): void;
     protected [$isElementInViewport]: boolean;
     protected [$loaded]: boolean;
     protected [$loadedTime]: number;
@@ -2649,27 +2780,6 @@ declare interface AnnotationInterface {
     surfaceFromPoint(pixelX: number, pixelY: number): string | null;
 }
 
-interface PanoramaAreaDefinition {
-    readonly name: string;
-    readonly mask: {
-        readonly width: number;
-        readonly height: number;
-        readonly bounds: {
-            readonly x: number;
-            readonly y: number;
-            readonly width: number;
-            readonly height: number;
-        };
-        /** Row-major, least significant bit first, relative to bounds. */
-        readonly bits: Uint8Array;
-    };
-}
-interface PanoramaAreaHit {
-    name: string;
-    u: number;
-    v: number;
-}
-
 interface PanoramaAreasInterface {
     setPanoramaAreas(areas: readonly PanoramaAreaDefinition[]): void;
     setPanoramaAreaHighlight(name: string | null, color?: string): void;
@@ -2736,4 +2846,4 @@ declare global {
 }
 
 export { ModelViewerElement };
-export type { ExtraModelPlacement, ExtraModelTransformEventDetail, ExtraModelTransformMode, PanoramaAreaDefinition, PanoramaAreaHit, RGB$1 as RGB, RGBA$1 as RGBA };
+export type { ExtraModelPlacement, ExtraModelTransformEventDetail, ExtraModelTransformMode, PanoramaAreaDefinition, PanoramaAreaHit, RGB$1 as RGB, RGBA$1 as RGBA, RenderBackend, RenderBackendPreference };

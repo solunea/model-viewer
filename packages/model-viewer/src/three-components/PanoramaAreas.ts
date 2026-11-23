@@ -1,6 +1,6 @@
 /* @license Copyright 2026 Solunea. Licensed under the Apache License,
  * Version 2.0. */
-import {BackSide, Color, DataTexture, Group, Mesh, NearestFilter, Raycaster, RedFormat, ShaderMaterial, Sphere, SphereGeometry, Vector2, Vector3, Vector4} from 'three';
+import {BackSide, Color, DataTexture, Group, Material, Mesh, NearestFilter, Raycaster, RedFormat, ShaderMaterial, Sphere, SphereGeometry, Vector2, Vector3, Vector4} from 'three';
 
 import {ModelScene} from './ModelScene.js';
 
@@ -20,6 +20,15 @@ export interface PanoramaAreaHit {
   u: number;
   v: number;
 }
+
+export interface PanoramaAreaMaterial {
+  material: Material;
+  update(mask: DataTexture, progress: number): void;
+}
+
+export type CreatePanoramaAreaMaterial =
+    (mask: DataTexture, color: Color, dimensions: Vector2, bounds: Vector4) =>
+        PanoramaAreaMaterial;
 
 const radius = 10;
 const sphere = new Sphere(new Vector3(), radius);
@@ -82,7 +91,9 @@ function combineMasks(areas: PanoramaAreaDefinition[], limit: number): PanoramaA
 export class PanoramaAreas extends Group {
   private areas = new Map<string, PanoramaAreaDefinition>();
   private highlighted: string|null = null;
-  private mesh: Mesh<SphereGeometry, ShaderMaterial>|null = null;
+  private mesh: Mesh<SphereGeometry, Material>|null = null;
+  private webglMaterial: ShaderMaterial|null = null;
+  private webgpuMaterial: PanoramaAreaMaterial|null = null;
   private texture: DataTexture|null = null;
   private uploaded: PanoramaAreaDefinition|null = null;
   private active = false;
@@ -153,7 +164,7 @@ export class PanoramaAreas extends Group {
     const phase = elapsed < 0 ? 1 : Math.min(1, (elapsed % 3000) / 900);
     if (this.shineProgress === phase) return;
     this.shineProgress = phase;
-    this.mesh.material.uniforms.shineProgress.value = phase;
+    this.webglMaterial!.uniforms.shineProgress.value = phase;
     this.scene.queueRender();
   }
 
@@ -271,6 +282,7 @@ export class PanoramaAreas extends Group {
               #include <colorspace_fragment>
             }`
         });
+        this.webglMaterial = material;
         this.mesh = new Mesh(new SphereGeometry(radius, 64, 32), material);
         this.mesh.name = 'PanoramaAreaHighlight';
         this.mesh.userData.noHit = true;
@@ -298,7 +310,7 @@ export class PanoramaAreas extends Group {
         this.texture = new DataTexture(pixels, tw, th, RedFormat);
         this.texture.minFilter = this.texture.magFilter = NearestFilter;
         this.texture.needsUpdate = true;
-        const {uniforms} = this.mesh.material;
+        const {uniforms} = this.webglMaterial!;
         uniforms.mask.value = this.texture;
         uniforms.panorama.value.set(width, height);
         uniforms.bounds.value.set(
@@ -308,7 +320,7 @@ export class PanoramaAreas extends Group {
       }
     }
     if (this.mesh) {
-      const uniform = this.mesh.material.uniforms.shineProgress;
+      const uniform = this.webglMaterial!.uniforms.shineProgress;
       const phase = shining ? this.shineProgress : -1;
       if (uniform.value !== phase) {
         uniform.value = phase;
@@ -322,13 +334,35 @@ export class PanoramaAreas extends Group {
     this.visible = visible;
   }
 
+  withMaterial(createMaterial: CreatePanoramaAreaMaterial, render: () => void) {
+    const {mesh, texture, webglMaterial} = this;
+    if (!this.visible || mesh == null || texture == null || webglMaterial == null) {
+      render();
+      return;
+    }
+    const uniforms = webglMaterial.uniforms;
+    const gpu = this.webgpuMaterial ??= createMaterial(
+        texture, this.highlightColor, uniforms.panorama.value,
+        uniforms.bounds.value);
+    gpu.update(texture, uniforms.shineProgress.value);
+    mesh.material = gpu.material;
+    try {
+      render();
+    } finally {
+      mesh.material = webglMaterial;
+    }
+  }
+
   private releaseGraphics() {
     this.texture?.dispose();
     this.texture = null;
     this.uploaded = null;
     if (this.mesh) {
       this.mesh.geometry.dispose();
-      this.mesh.material.dispose();
+      this.webglMaterial?.dispose();
+      this.webglMaterial = null;
+      this.webgpuMaterial?.material.dispose();
+      this.webgpuMaterial = null;
       this.remove(this.mesh);
       this.mesh = null;
       this.scene.queueRender();

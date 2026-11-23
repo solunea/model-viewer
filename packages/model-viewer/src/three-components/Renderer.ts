@@ -14,10 +14,11 @@
  */
 
 import {Event, EventDispatcher, NeutralToneMapping, Vector2, WebGLRenderer} from 'three';
+import type {WebGPURenderer} from 'three/webgpu';
 
 import {$updateEnvironment} from '../features/environment.js';
 import {ModelViewerGlobalConfig} from '../features/loading.js';
-import ModelViewerElementBase, {$canvas, $tick, $updateSize} from '../model-viewer-base.js';
+import ModelViewerElementBase, {$canvas, $setRenderBackend, $tick, $updateSize, EffectComposerInterface, RendererInterface} from '../model-viewer-base.js';
 import {clamp, isDebugMode} from '../utilities.js';
 
 import {ARRenderer} from './ARRenderer.js';
@@ -27,6 +28,7 @@ import {ModelScene} from './ModelScene.js';
 import {SkyboxDof, supportsSkyboxDof} from './SkyboxDof.js';
 import TextureUtils from './TextureUtils.js';
 import {ModelViewerViewHelper, ViewHelperOrbit} from './ViewHelper.js';
+import type {WebGPUContext} from './WebGPU.js';
 
 export interface RendererOptions {
   powerPreference: string;
@@ -100,7 +102,8 @@ export class Renderer extends
   public canvas3D: HTMLCanvasElement;
   public textureUtils: TextureUtils|null;
   public arRenderer: ARRenderer;
-  public loader = new CachingGLTFLoader(ModelViewerGLTFInstance);
+  public loader = new CachingGLTFLoader(
+      ModelViewerGLTFInstance, () => this.gpuProbe);
   public width = 0;
   public height = 0;
   public dpr = 1;
@@ -115,6 +118,18 @@ export class Renderer extends
       (HIGH_FRAME_DURATION_MS + LOW_FRAME_DURATION_MS) / 2;
   private viewHelpers = new Map<ModelScene, ModelViewerViewHelper>();
   private skyboxDof: SkyboxDof|null = null;
+  private gpu: WebGPUContext|null = null;
+  private gpuProbe: Promise<WebGPUContext|null>|null = null;
+  private gpuPending = false;
+  private gpuUnavailable = false;
+  private disposed = false;
+  private readonly failedGPUScenes = new WeakSet<ModelScene>();
+  private readonly gpuEffects = new WeakMap<EffectComposerInterface, boolean>();
+  private readonly externalBackends = new WeakMap<RendererInterface, {
+    context: WebGPUContext|null,
+    ready: boolean,
+    pending: Promise<void>
+  }>();
 
   get canRender() {
     return this.threeRenderer != null;
@@ -135,7 +150,7 @@ export class Renderer extends
     this.lastStep = i - 1;
   }
 
-  constructor(options: RendererOptions) {
+  constructor(private readonly options: RendererOptions) {
     super();
 
     this.dpr = window.devicePixelRatio;
@@ -155,10 +170,7 @@ export class Renderer extends
       this.threeRenderer.autoClear = true;
       this.threeRenderer.setPixelRatio(1);  // handle pixel ratio externally
 
-      this.threeRenderer.debug = {
-        checkShaderErrors: !!options.debug,
-        onShaderError: null
-      };
+      this.threeRenderer.debug.checkShaderErrors = !!options.debug;
 
       // ACESFilmicToneMapping appears to be the most "saturated",
       // and similar to Filament's gltf-viewer.
@@ -168,8 +180,9 @@ export class Renderer extends
     }
 
     this.arRenderer = this.canRender ? new ARRenderer(this) : null as any;
-    this.textureUtils =
-        this.canRender ? new TextureUtils(this.threeRenderer) : null;
+    this.textureUtils = this.canRender ?
+        new TextureUtils(this.threeRenderer, () => this.gpuUnavailable ? null : this.gpuProbe) :
+        null;
     if (this.canRender) {
       CachingGLTFLoader.initializeKTX2Loader(this.threeRenderer);
     }
@@ -185,6 +198,7 @@ export class Renderer extends
     this.scenes.add(scene);
 
     scene.forceRescale();
+    this.updateBackend(scene);
 
     if (this.canRender) {
       const size = new Vector2();
@@ -201,6 +215,7 @@ export class Renderer extends
 
   unregisterScene(scene: ModelScene) {
     this.scenes.delete(scene);
+    this.failedGPUScenes.delete(scene);
     this.disposeViewHelper(scene);
     if (this.skyboxDof != null) {
       this.releaseUnusedSkyboxDof();
@@ -216,9 +231,130 @@ export class Renderer extends
   }
 
   displayCanvas(scene: ModelScene): HTMLCanvasElement {
+    const externalCanvas = scene.externalRenderer?.captureCanvas?.();
+    if (externalCanvas != null) return externalCanvas;
+    if (scene.element.activeRenderBackend === 'webgpu') return scene.canvas;
     return scene.element.modelIsVisible && !this.multipleScenesVisible ?
         this.canvas3D :
         scene.element[$canvas];
+  }
+
+  private wantsWebGPU(scene: ModelScene): boolean {
+    const {effectRenderer, externalRenderer, element} = scene;
+    return element.renderBackend !== 'webgl' && !this.gpuUnavailable &&
+        !this.failedGPUScenes.has(scene) &&
+        (externalRenderer == null || externalRenderer.prepareRenderBackend != null) &&
+        (effectRenderer == null ||
+         (effectRenderer.prepareWebGPU != null &&
+          effectRenderer.renderWebGPU != null &&
+          effectRenderer.supportsWebGPU?.() !== false));
+  }
+
+  updateBackend(scene: ModelScene) {
+    if (!this.scenes.has(scene)) return;
+    this.failedGPUScenes.delete(scene);
+    if (this.wantsWebGPU(scene)) void this.probeWebGPU();
+    scene.queueRender();
+  }
+
+  private probeWebGPU(): Promise<WebGPUContext|null> {
+    if (this.disposed || this.gpuUnavailable || !globalThis.isSecureContext ||
+        !navigator.gpu) {
+      return Promise.resolve(null);
+    }
+    if (this.gpuProbe != null) return this.gpuProbe;
+    this.gpuPending = true;
+    this.gpuProbe = import('./WebGPU.js')
+                        .then(({WebGPUContext}) => WebGPUContext.create(
+                            this.options.powerPreference, this.handleDeviceLoss))
+                        .then(context => {
+                          if (this.disposed || this.gpuUnavailable) {
+                            context?.dispose();
+                            return null;
+                          }
+                          if (context != null) {
+                            this.gpu = context;
+                            context.renderer.setSize(
+                                this.canvas3D.width, this.canvas3D.height, false);
+                            CachingGLTFLoader.initializeKTX2Loader(
+                                this.threeRenderer, context.renderer);
+                          } else {
+                            this.gpuUnavailable = true;
+                          }
+                          return context;
+                        })
+                        .catch(error => {
+                          console.warn('<model-viewer> WebGPU initialization failed.', error);
+                          this.gpuUnavailable = true;
+                          this.gpu?.dispose();
+                          this.gpu = null;
+                          return null;
+                        })
+                        .finally(() => {
+                          this.gpuPending = false;
+                          for (const scene of this.scenes) scene.queueRender();
+                        });
+    return this.gpuProbe;
+  }
+
+  async prepareExternalRenderer(scene: ModelScene, external: RendererInterface) {
+    if (external.prepareRenderBackend == null) return;
+    const context = this.wantsWebGPU(scene) ? await this.probeWebGPU() : null;
+    await this.prepareExternalBackend(scene, external, context);
+  }
+
+  private prepareExternalBackend(
+      scene: ModelScene, external: RendererInterface,
+      context: WebGPUContext|null) {
+    const previous = this.externalBackends.get(external);
+    if (previous?.context === context) return previous.pending;
+    const state = {context, ready: false, pending: Promise.resolve()};
+    const onError = (error: unknown) => {
+      if (this.externalBackends.get(external) === state) {
+        this.fallbackScene(scene, error);
+      }
+    };
+    state.pending = (previous?.pending.catch(() => {}) ?? Promise.resolve())
+                        .then(() => external.prepareRenderBackend!(context, onError))
+                        .catch(async error => {
+                          if (context == null) throw error;
+                          this.fallbackScene(scene, error);
+                          state.context = null;
+                          await external.prepareRenderBackend!(null, onError);
+                        })
+                        .then(() => {
+                          state.ready = true;
+                          scene.queueRender();
+                        });
+    this.externalBackends.set(external, state);
+    return state.pending;
+  }
+
+  private fallbackScene(scene: ModelScene, error: unknown) {
+    this.failedGPUScenes.add(scene);
+    scene.queueRender();
+    console.warn('<model-viewer> Using WebGL for this scene.', error);
+  }
+
+  private handleDeviceLoss = () => {
+    if (this.gpuUnavailable || this.disposed) return;
+    this.gpuUnavailable = true;
+    const context = this.gpu;
+    this.gpu = null;
+    for (const scene of this.scenes) scene.queueRender();
+    if (this.isPresenting) {
+      void this.arRenderer.stopPresenting().finally(() => context?.dispose());
+    } else {
+      context?.dispose();
+    }
+  };
+
+  webGPUForXR(scene: ModelScene, environmentEstimation: boolean) {
+    if (environmentEstimation || !this.wantsWebGPU(scene) ||
+        !('XRGPUBinding' in globalThis)) {
+      return null;
+    }
+    return this.gpu;
   }
 
   /**
@@ -291,6 +427,7 @@ export class Renderer extends
     if (this.canRender) {
       this.threeRenderer.setSize(width, height, false);
     }
+    this.gpu?.renderer.setSize(width, height, false);
 
     // Each scene's canvas must match the renderer size. In general they can be
     // larger than the element that contains them, but the overflow is hidden
@@ -393,7 +530,8 @@ export class Renderer extends
   }
 
   private renderViewHelper(
-      scene: ModelScene, x: number, y: number, width: number, height: number) {
+      scene: ModelScene, x: number, y: number, width: number, height: number,
+      renderer: WebGLRenderer|WebGPURenderer = this.threeRenderer) {
     if (!scene.element.viewHelper) {
       this.disposeViewHelper(scene);
       return;
@@ -405,7 +543,7 @@ export class Renderer extends
       this.viewHelpers.set(scene, viewHelper);
     }
 
-    viewHelper.render(this.threeRenderer, {
+    viewHelper.render(renderer, {
       x,
       y,
       width,
@@ -436,7 +574,8 @@ export class Renderer extends
         null;
   }
 
-  private copyPixels(scene: ModelScene, width: number, height: number) {
+  private copyPixels(
+      scene: ModelScene, width: number, height: number, canvas = this.canvas3D) {
     const context2D = scene.context;
     if (context2D == null) {
       console.log('could not acquire 2d context');
@@ -444,7 +583,7 @@ export class Renderer extends
     }
     context2D.clearRect(0, 0, width, height);
     context2D.drawImage(
-        this.canvas3D, 0, 0, width, height, 0, 0, width, height);
+        canvas, 0, 0, width, height, 0, 0, width, height);
     scene.canvas.classList.add('show');
   }
 
@@ -473,7 +612,9 @@ export class Renderer extends
    * This method takes care of updating the element and renderer state based on
    * the time that has passed since the last rendered frame.
    */
-  preRender(scene: ModelScene, t: number, delta: number) {
+  preRender(
+      scene: ModelScene, t: number, delta: number,
+      renderer: WebGLRenderer|WebGPURenderer = this.threeRenderer) {
     const {element, exposure, toneMapping} = scene;
 
     element[$tick](t, delta);
@@ -484,7 +625,7 @@ export class Renderer extends
     const sky = element.skyboxImage;
     const compensateExposure = toneMapping === NeutralToneMapping &&
         (env === 'neutral' || env === 'legacy' || (!env && !sky));
-    this.threeRenderer.toneMappingExposure =
+    renderer.toneMappingExposure =
         (exposureIsNumber ? exposure : 1.0) *
         (compensateExposure ? COMMERCE_EXPOSURE : 1.0);
   }
@@ -520,14 +661,42 @@ export class Renderer extends
         continue;
       }
 
-      this.preRender(scene, t, delta);
+      const wantsGPU = this.wantsWebGPU(scene);
+      if (wantsGPU && this.gpuPending) continue;
+      const context = wantsGPU ? this.gpu : null;
+      const {externalRenderer, effectRenderer} = scene;
+      if (externalRenderer?.prepareRenderBackend != null) {
+        const state = this.externalBackends.get(externalRenderer);
+        if (state == null || state.context !== context) {
+          void this.prepareExternalBackend(scene, externalRenderer, context)
+              .catch(error => console.error(error));
+          continue;
+        }
+        if (!state.ready) continue;
+      } else if (context != null && effectRenderer != null) {
+        const ready = this.gpuEffects.get(effectRenderer);
+        if (ready !== true) {
+          if (ready == null) {
+            this.gpuEffects.set(effectRenderer, false);
+            void effectRenderer.prepareWebGPU!(context).then(() => {
+              this.gpuEffects.set(effectRenderer, true);
+              scene.queueRender();
+            }, error => {
+              this.gpuEffects.delete(effectRenderer);
+              this.fallbackScene(scene, error);
+            });
+          }
+          continue;
+        }
+      }
+      this.preRender(scene, t, delta, context?.renderer);
       scene.updateSkyboxDof(delta);
 
       if (!this.shouldRender(scene)) {
         continue;
       }
 
-      if (scene.externalRenderer != null) {
+      if (externalRenderer != null) {
         const camera = scene.getCamera();
         camera.updateMatrix();
         const {matrix, projectionMatrix} = camera;
@@ -537,10 +706,16 @@ export class Renderer extends
         viewMatrix[13] += target.y;
         viewMatrix[14] += target.z;
 
-        scene.externalRenderer.render({
-          viewMatrix: viewMatrix,
-          projectionMatrix: projectionMatrix.elements
-        });
+        try {
+          externalRenderer.render({
+            viewMatrix: viewMatrix,
+            projectionMatrix: projectionMatrix.elements
+          });
+          element[$setRenderBackend](context != null ? 'webgpu' : 'webgl');
+        } catch (error) {
+          if (context == null) throw error;
+          this.fallbackScene(scene, error);
+        }
         continue;
       }
 
@@ -556,6 +731,36 @@ export class Renderer extends
 
       const {width, height} = this.sceneSize(scene);
       const viewportY = Math.ceil(this.height * this.dpr) - height;
+
+      if (context != null && width > 0 && height > 0) {
+        try {
+          const {renderer} = context;
+          scene.renderShadow(renderer, context.shadows);
+          renderer.setRenderTarget(null);
+          renderer.setViewport(0, 0, width, height);
+          renderer.autoClear = true;
+          renderer.toneMapping = scene.toneMapping;
+          context.withScene(scene, () => {
+            if (effectRenderer?.renderWebGPU != null) {
+              effectRenderer.renderWebGPU(delta);
+            } else {
+              context.render(scene, width, height);
+            }
+          });
+          this.renderViewHelper(scene, 0, viewportY, width, height, renderer);
+          this.copyPixels(scene, width, height, context.canvas);
+          if (canvas3D.parentElement === scene.canvas.parentElement) {
+            canvas3D.remove();
+          }
+          element[$setRenderBackend]('webgpu');
+          scene.hasRendered();
+          ++scene.renderCount;
+          this.renderedLastFrame = true;
+        } catch (error) {
+          this.fallbackScene(scene, error);
+        }
+        continue;
+      }
 
       scene.renderShadow(this.threeRenderer);
 
@@ -587,11 +792,12 @@ export class Renderer extends
         scene.canvas.classList.remove('show');
       }
 
+      element[$setRenderBackend]('webgl');
       scene.hasRendered();
       ++scene.renderCount;
       this.renderedLastFrame = true;
     }
-    if (this.skyboxDof != null) {
+    if (this.skyboxDof != null || this.gpu?.hasSkyboxDof === true) {
       this.releaseUnusedSkyboxDof();
     }
   }
@@ -604,9 +810,13 @@ export class Renderer extends
     }
     this.skyboxDof?.dispose();
     this.skyboxDof = null;
+    this.gpu?.releaseSkyboxDof();
   }
 
   dispose(): Array<ModelViewerElementBase> {
+    this.disposed = true;
+    this.gpu?.dispose();
+    this.gpu = null;
     this.skyboxDof?.dispose();
     this.skyboxDof = null;
     if (this.textureUtils != null) {
@@ -643,8 +853,9 @@ export class Renderer extends
     this.skyboxDof?.dispose();
     this.skyboxDof = null;
     this.textureUtils?.dispose();
-    this.textureUtils =
-        this.canRender ? new TextureUtils(this.threeRenderer) : null;
+    this.textureUtils = this.canRender ?
+        new TextureUtils(this.threeRenderer, () => this.gpuUnavailable ? null : this.gpuProbe) :
+        null;
     for (const scene of this.scenes) {
       (scene.element as any)[$updateEnvironment]();
     }

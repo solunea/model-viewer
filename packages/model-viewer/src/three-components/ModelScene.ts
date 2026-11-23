@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import {AnimationAction, AnimationActionLoopStyles, AnimationClip, AnimationMixer, AnimationMixerEventMap, Box3, Camera, ColorManagement, DataTexture, Euler, Event as ThreeEvent, Intersection, LoopOnce, LoopPingPong, LoopRepeat, Material, Matrix3, Matrix4, Mesh, MeshBasicMaterial, NeutralToneMapping, Object3D, PerspectiveCamera, Raycaster, Scene, Sphere, SphereGeometry, SRGBTransfer, Texture, ToneMapping, Triangle, Vector2, Vector3, WebGLRenderer, XRTargetRaySpace} from 'three';
+import {AnimationAction, AnimationActionLoopStyles, AnimationClip, AnimationMixer, AnimationMixerEventMap, Box3, Camera, ColorManagement, DataTexture, Euler, Event as ThreeEvent, Intersection, LoopOnce, LoopPingPong, LoopRepeat, Material, Matrix3, Matrix4, Mesh, MeshBasicMaterial, NeutralToneMapping, Object3D, PerspectiveCamera, Raycaster, Scene, SkinnedMesh, Sphere, SphereGeometry, SRGBTransfer, Texture, ToneMapping, Triangle, Vector2, Vector3, WebGLRenderer, XRTargetRaySpace} from 'three';
 import {CSS2DRenderer} from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 
 import {$currentGLTF, $model, $originalGltfJson} from '../features/scene-graph.js';
@@ -27,7 +27,9 @@ import {Damper, SETTLING_TIME} from './Damper.js';
 import {ModelViewerGLTFInstance} from './gltf-instance/ModelViewerGLTFInstance.js';
 import {GroundedSkybox} from './GroundedSkybox.js';
 import {Hotspot} from './Hotspot.js';
-import {Shadow} from './Shadow.js';
+import {Shadow, WebGPUShadowMaterials} from './Shadow.js';
+import type {WebGPURenderer} from 'three/webgpu';
+import type {PanoramaAreas} from './PanoramaAreas.js';
 import {depthTexture, sampleSkyboxDepth, SkyboxDepthImage} from './SkyboxDepth.js';
 import {SKYBOX_CACHE_KEY} from './TextureUtils.js';
 
@@ -153,6 +155,7 @@ export class ModelScene extends Scene {
   framedFoVDeg = 0;
 
   shadow: Shadow|null = null;
+  panoramaAreas: PanoramaAreas|null = null;
   shadowIntensity = 0;
   shadowSoftness = 1;
   bakedShadows = new Set<Mesh>();
@@ -297,7 +300,9 @@ export class ModelScene extends Scene {
     this.extraUrls = extraUrls;
 
     if (this.externalRenderer != null) {
-      const framingInfo = await this.externalRenderer.load(progressCallback);
+      const external = this.externalRenderer;
+      await this.element[$renderer].prepareExternalRenderer(this, external);
+      const framingInfo = await external.load(progressCallback);
 
       this.boundingSphere.radius = framingInfo.framedRadius;
       this.idealAspect = framingInfo.fieldOfViewAspect;
@@ -387,6 +392,16 @@ export class ModelScene extends Scene {
   }
 
   private async setupScene() {
+    // WebGL pads the matrix array when it creates a bone texture. Do that
+    // before WebGPU can allocate a uniform buffer using the original size.
+    for (const model of this._models) {
+      model.traverse(object => {
+        const mesh = object as SkinnedMesh;
+        if (mesh.isSkinnedMesh && mesh.skeleton?.boneTexture === null) {
+          mesh.skeleton.computeBoneTexture();
+        }
+      });
+    }
     this.applyTransform();
     this.updateBoundingBox();
 
@@ -1811,13 +1826,11 @@ export class ModelScene extends Scene {
     }
   }
 
-  renderShadow(renderer: WebGLRenderer) {
+  renderShadow(
+      renderer: WebGLRenderer|WebGPURenderer, gpu?: WebGPUShadowMaterials) {
     this.updateBoundingBoxAndShadowIfDirty();
     const shadow = this.shadow;
-    if (shadow != null && shadow.needsUpdate == true) {
-      shadow.render(renderer, this);
-      shadow.needsUpdate = false;
-    }
+    shadow?.render(renderer, this, gpu);
   }
 
   private queueShadowRender() {

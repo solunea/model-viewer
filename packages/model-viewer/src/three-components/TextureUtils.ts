@@ -15,12 +15,13 @@
 
 import {GainMapDecoderMaterial, HDRJPGLoader, QuadRenderer} from '@monogrid/gainmap-js';
 import {BackSide, BoxGeometry, CubeCamera, CubeTexture, DataTexture, EquirectangularReflectionMapping, HalfFloatType, LinearSRGBColorSpace, Loader, Mesh, NoBlending, NoToneMapping, RGBAFormat, Scene, ShaderMaterial, SRGBColorSpace, Texture, TextureLoader, Vector3, WebGLCubeRenderTarget, WebGLRenderer} from 'three';
-import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
+import {HDRLoader} from 'three/examples/jsm/loaders/HDRLoader.js';
 
 import {deserializeUrl, timePasses} from '../utilities.js';
 
 import {ktx2Loader} from './CachingGLTFLoader.js';
 import EnvironmentScene from './EnvironmentScene.js';
+import type {WebGPUContext} from './WebGPU.js';
 
 export interface EnvironmentMapAndSkybox {
   environmentMap: Texture;
@@ -71,7 +72,7 @@ export default class TextureUtils {
 
   private _ldrLoader: TextureLoader|null = null;
   private _imageLoader: HDRJPGLoader|null = null;
-  private _hdrLoader: RGBELoader|null = null;
+  private _hdrLoader: HDRLoader|null = null;
   private _lottieLoader: Loader|null = null;
 
   private generatedEnvironmentMap: Promise<CubeTexture>|null = null;
@@ -84,7 +85,10 @@ export default class TextureUtils {
   private blurScene: Scene|null = null;
   private blurTempTarget: WebGLCubeRenderTarget|null = null;
 
-  constructor(private threeRenderer: WebGLRenderer) {
+  constructor(
+      private threeRenderer: WebGLRenderer,
+      private readonly readyWebGPU: () => Promise<WebGPUContext|null>|null =
+          () => null) {
   }
 
   private ldrLoader(withCredentials: boolean): TextureLoader {
@@ -103,9 +107,9 @@ export default class TextureUtils {
     return this._imageLoader;
   }
 
-  private hdrLoader(withCredentials: boolean): RGBELoader {
+  private hdrLoader(withCredentials: boolean): HDRLoader {
     if (this._hdrLoader == null) {
-      this._hdrLoader = new RGBELoader();
+      this._hdrLoader = new HDRLoader();
       this._hdrLoader.setDataType(HalfFloatType);
     }
     this._hdrLoader.setWithCredentials(withCredentials);
@@ -176,9 +180,15 @@ export default class TextureUtils {
                 },
                 reject));
       } else {
+        const onProgress = (event: {loaded: number, total: number}) => {
+          progressCallback(event.loaded / event.total * 0.9);
+        };
+        const gpu = isHDR ? null : await this.readyWebGPU();
+        const gpuTexture = await gpu?.loadGainMap(url, withCredentials, onProgress)
+                               .catch(() => null);
         const loader = isHDR ? this.hdrLoader(withCredentials) :
                                this.imageLoader(withCredentials);
-        texture = await new Promise<Texture>(
+        texture = gpuTexture ?? await new Promise<Texture>(
             (resolve, reject) => loader.load(
               url,
               (result: any) => {
@@ -219,9 +229,7 @@ export default class TextureUtils {
                   resolve(result as DataTexture);
                 }
               },
-              (event: {loaded: number, total: number}) => {
-                progressCallback(event.loaded / event.total * 0.9);
-              },
+              onProgress,
               reject));
       }
 
@@ -353,7 +361,7 @@ export default class TextureUtils {
     return this.skyboxCache.get(resolvedCacheKey)!;
   }
 
-  private async GenerateEnvironmentMap(scene: Scene, name: string) {
+  private async GenerateEnvironmentMap(scene: EnvironmentScene, name: string) {
     await timePasses();
 
     const renderer = this.threeRenderer;
@@ -373,12 +381,14 @@ export default class TextureUtils {
     renderer.toneMapping = NoToneMapping;
     renderer.outputColorSpace = LinearSRGBColorSpace;
 
-    cubeCamera.update(renderer, scene);
-
-    this.blurCubemap(cubeTarget, GENERATED_SIGMA);
-
-    renderer.toneMapping = toneMapping;
-    renderer.outputColorSpace = outputColorSpace;
+    try {
+      cubeCamera.update(renderer, scene);
+      this.blurCubemap(cubeTarget, GENERATED_SIGMA);
+    } finally {
+      scene.dispose();
+      renderer.toneMapping = toneMapping;
+      renderer.outputColorSpace = outputColorSpace;
+    }
 
     return generatedEnvironmentMap;
   }

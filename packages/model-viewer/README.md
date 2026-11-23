@@ -39,16 +39,30 @@ masks, precise hit detection and a single highlight inside the native renderer.
 - CSS hex colors and non-finite camera angles receive the upstream fixes.
 
 Solunea's skybox transitions, depth of field, shadow controls, automatic extra-model
-placement, view helper and external input forwarding are retained. Three.js stays
-on the existing `^0.183.0` dependency range.
+placement, view helper and external input forwarding use Three.js r187.
 
-Build the custom package from the repository root:
+Build the viewer and effects from the repository root.
 
 ```sh
-npm run build --workspace=@solunea/model-viewer
+npm run build --workspace=@solunea/model-viewer --workspace=@solunea/model-viewer-effects
 ```
 
 This regenerates the standalone and external-Three.js bundles under `dist/`.
+
+### Render backend
+
+The default `auto` mode tries WebGPU in secure contexts and falls back to WebGL
+when WebGPU cannot render. Force WebGL on a viewer with
+`render-backend="webgl"` or by setting `viewer.renderBackend = 'webgl'`.
+Set the property back to `'auto'` to resume automatic selection.
+
+`activeRenderBackend` reports the backend that presented the last frame, or
+`null` before the first one. The `render-backend-change` event provides the
+new backend in `event.detail.backend`.
+
+For the external-Three.js bundles, serve the two WebGPU companion modules next
+to their entry points. Map `three`, `three/webgpu` and `three/tsl` to the
+corresponding builds from the same Three.js r187 installation.
 
 ### Editing extra models
 
@@ -94,8 +108,8 @@ focus, call `focusSkyboxAtPoint(event.clientX, event.clientY)` or
 `focusSkyboxOnHotspot('hotspot-chair')` on the viewer. Both methods set manual
 focus and return the normalized depth when the map is available.
 
-The effect applies to ungrounded backgrounds in the native WebGL renderer.
-HDR blur requires floating-point render targets. The bundled depth decoder
+The effect applies to ungrounded backgrounds in WebGL and WebGPU.
+HDR blur uses floating-point render targets. The bundled depth decoder
 uses a blob worker. Sites with a Content Security Policy that controls
 workers can enable it with `worker-src 'self' blob:`.
 

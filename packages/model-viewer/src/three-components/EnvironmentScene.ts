@@ -241,4 +241,17 @@ export default class EnvironmentScene extends Scene {
     material.color.setScalar(intensity);
     return material;
   }
+
+  dispose() {
+    const geometries = new Set<BoxGeometry>();
+    const materials = new Set<MeshBasicMaterial|MeshStandardMaterial>();
+    for (const child of this.children) {
+      if (child instanceof Mesh) {
+        geometries.add(child.geometry);
+        materials.add(child.material);
+      }
+    }
+    for (const geometry of geometries) geometry.dispose();
+    for (const material of materials) material.dispose();
+  }
 }

@@ -13,13 +13,23 @@
  * limitations under the License.
  */
 
-import {BackSide, BasicShadowMap, Box3, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial, MeshDepthMaterial, Object3D, OrthographicCamera, PlaneGeometry, RGBAFormat, Scene, ShaderChunk, ShaderMaterial, ShadowMaterial, Vector3, WebGLRenderer, WebGLRenderTarget} from 'three';
+import {BackSide, BasicShadowMap, Box3, DirectionalLight, DoubleSide, Material, Mesh, MeshBasicMaterial, MeshDepthMaterial, Object3D, OrthographicCamera, PCFShadowMap, PlaneGeometry, RGBAFormat, Scene, ShaderChunk, ShaderMaterial, ShadowMaterial, Texture, Vector3, WebGLRenderer, WebGLRenderTarget} from 'three';
+import type {WebGPURenderer} from 'three/webgpu';
 
 import {Damper} from './Damper.js';
 import {ModelScene} from './ModelScene.js';
 
 export type Side = 'back'|'bottom';
 export type ShadowMode = 'basic'|'pcss';
+
+export interface WebGPUShadowMaterials {
+  depth: Material;
+  blur: Material;
+  setDepth(camera: OrthographicCamera, opacity: number): void;
+  setBlur(source: Texture, x: number, y: number): void;
+  setPCSS(light: DirectionalLight, lightSize: number, nearPlane: number): void;
+  withPCSSShadow(light: DirectionalLight, render: () => void): void;
+}
 
 const DEFAULT_SHADOW_THETA = 0;
 const DEFAULT_SHADOW_PHI = 0;
@@ -164,6 +174,7 @@ const _center = new Vector3();
  * Mode is auto-selected: basic when orbit is (0,0), pcss when orbit is non-zero.
  */
 export class Shadow extends Object3D {
+  private lastRenderer: WebGLRenderer|WebGPURenderer|null = null;
   private mode: ShadowMode = 'basic';
 
   // ─── Shared state ───
@@ -492,12 +503,16 @@ export class Shadow extends Object3D {
     return 0.001 * this.maxDimension;
   }
 
-  render(renderer: WebGLRenderer, scene: Scene) {
+  render(
+      renderer: WebGLRenderer|WebGPURenderer, scene: Scene,
+      gpu?: WebGPUShadowMaterials) {
+    if (!this.needsUpdate && this.lastRenderer === renderer) return;
     if (this.mode === 'basic') {
-      this.renderBasic(renderer, scene);
+      this.renderBasic(renderer, scene, gpu);
     } else {
-      this.renderPCSS(renderer, scene);
+      this.renderPCSS(renderer, scene, gpu);
     }
+    this.lastRenderer = renderer;
     this.needsUpdate = false;
   }
 
@@ -508,6 +523,11 @@ export class Shadow extends Object3D {
   dispose() {
     this.disposeMode();
     this.removeFromParent();
+  }
+
+  withWebGPUShadow(materials: WebGPUShadowMaterials, render: () => void) {
+    if (this.light == null) render();
+    else materials.withPCSSShadow(this.light, render);
   }
 
   // ─── Basic mode internals ───
@@ -590,47 +610,70 @@ export class Shadow extends Object3D {
     this.needsUpdate = true;
   }
 
-  private renderBasic(renderer: WebGLRenderer, scene: Scene) {
+  private renderBasic(
+      renderer: WebGLRenderer|WebGPURenderer, scene: Scene,
+      gpu?: WebGPUShadowMaterials) {
     if (this.basicCamera == null || this.renderTarget == null) return;
 
-    scene.overrideMaterial = this.depthMaterial;
-    this.floor.visible = false;
-
     const xrEnabled = renderer.xr.enabled;
-    renderer.xr.enabled = false;
-
     const oldRenderTarget = renderer.getRenderTarget();
-    renderer.setRenderTarget(this.renderTarget);
     const initialClearAlpha = renderer.getClearAlpha();
-    renderer.setClearAlpha(0);
-    const state = (renderer as any).state;
-    if (state != null) {
-      state.buffers.color.setMask(true);
-      state.buffers.depth.setMask(true);
-    }
-    renderer.clear();
-
     const initialAutoClear = renderer.autoClear;
-    renderer.autoClear = false;
-    renderer.render(scene, this.basicCamera);
-    renderer.autoClear = initialAutoClear;
-
-    scene.overrideMaterial = null;
-    this.floor.visible = true;
-
-    this.blurShadow(renderer);
-
-    renderer.xr.enabled = xrEnabled;
-    renderer.setRenderTarget(oldRenderTarget);
-    renderer.setClearAlpha(initialClearAlpha);
+    const background = scene.background;
+    const override = scene.overrideMaterial;
+    const floorVisible = this.floor.visible;
+    try {
+      renderer.xr.enabled = false;
+      renderer.setRenderTarget(this.renderTarget);
+      renderer.setClearAlpha(0);
+      if (gpu != null) {
+        gpu.setDepth(this.basicCamera, this.depthMaterial!.opacity);
+        scene.background = null;
+      } else {
+        const state = (renderer as WebGLRenderer).state;
+        state?.buffers.color.setMask(true);
+        state?.buffers.depth.setMask(true);
+      }
+      scene.overrideMaterial = gpu?.depth ?? this.depthMaterial;
+      this.floor.visible = false;
+      renderer.clear();
+      renderer.autoClear = false;
+      renderer.render(scene, this.basicCamera);
+      renderer.autoClear = initialAutoClear;
+      this.blurShadow(renderer, gpu);
+    } finally {
+      scene.background = background;
+      scene.overrideMaterial = override;
+      this.floor.visible = floorVisible;
+      renderer.autoClear = initialAutoClear;
+      renderer.xr.enabled = xrEnabled;
+      renderer.setRenderTarget(oldRenderTarget as WebGLRenderTarget|null);
+      renderer.setClearAlpha(initialClearAlpha);
+    }
   }
 
-  private blurShadow(renderer: WebGLRenderer) {
+  private blurShadow(
+      renderer: WebGLRenderer|WebGPURenderer, gpu?: WebGPUShadowMaterials) {
     if (this.basicCamera == null || this.blurPlane == null ||
         this.horizontalBlurMaterial == null || this.verticalBlurMaterial == null ||
         this.renderTarget == null || this.renderTargetBlur == null) return;
 
     this.blurPlane.visible = true;
+    if (gpu != null) {
+      try {
+        this.blurPlane.material = gpu.blur;
+        gpu.setBlur(this.renderTarget.texture, 1 / this.renderTarget.width, 0);
+        renderer.setRenderTarget(this.renderTargetBlur);
+        renderer.render(this.blurPlane, this.basicCamera);
+        gpu.setBlur(this.renderTargetBlur.texture, 0, 1 / this.renderTarget.height);
+        renderer.setRenderTarget(this.renderTarget);
+        renderer.render(this.blurPlane, this.basicCamera);
+      } finally {
+        this.blurPlane.visible = false;
+        this.blurPlane.material = this.horizontalBlurMaterial;
+      }
+      return;
+    }
 
     this.blurPlane.material = this.horizontalBlurMaterial;
     this.horizontalBlurMaterial.uniforms.h.value = 1 / this.renderTarget.width;
@@ -728,12 +771,17 @@ export class Shadow extends Object3D {
     }
   }
 
-  private renderPCSS(renderer: WebGLRenderer, scene: Scene) {
+  private renderPCSS(
+      renderer: WebGLRenderer|WebGPURenderer, scene: Scene,
+      gpu?: WebGPUShadowMaterials) {
     if (this.light == null) return;
+    gpu?.setPCSS(this.light, this.softness * this.maxDimension * 0.05 / this.frustumWidth,
+                 this.nearPlane);
 
     if (!renderer.shadowMap.enabled) {
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = BasicShadowMap;
+      renderer.shadowMap.type =
+          'isWebGPURenderer' in renderer ? PCFShadowMap : BasicShadowMap;
     }
 
     if (!this.castShadowSet) {
