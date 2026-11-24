@@ -18,6 +18,7 @@ import type {WebGPURenderer} from 'three/webgpu';
 
 import {Damper} from './Damper.js';
 import {ModelScene} from './ModelScene.js';
+import {pcssBlockerOffsets, pcssDepthEpsilon} from './PCSS.js';
 
 export type Side = 'back'|'bottom';
 export type ShadowMode = 'basic'|'pcss';
@@ -27,7 +28,8 @@ export interface WebGPUShadowMaterials {
   blur: Material;
   setDepth(camera: OrthographicCamera, opacity: number): void;
   setBlur(source: Texture, x: number, y: number): void;
-  setPCSS(light: DirectionalLight, lightSize: number, nearPlane: number): void;
+  setPCSS(
+      light: DirectionalLight, scale: number, maxInverseDepth: number): void;
   withPCSSShadow(light: DirectionalLight, render: () => void): void;
 }
 
@@ -38,6 +40,7 @@ const DEFAULT_SHADOW_PHI = 0;
 const LOG_MAX_RESOLUTION = 9;
 const LOG_MIN_RESOLUTION = 6;
 const DEFAULT_HARD_INTENSITY = 0.3;
+const PCSS_FRUSTUM_SCALE = 6;
 
 // ─── Blur shaders (compatible with Three.js r183) ───────────────────
 const BLUR_VERTEX = `varying vec2 vUv;
@@ -73,98 +76,129 @@ void main(){
   gl_FragColor = sum;
 }`;
 
-// ─── PCSS shader injection ──────────────────────────────────────────
-const originalShadowChunk = ShaderChunk.shadowmap_pars_fragment;
-let lastPCSS_lightSize = -1;
-let lastPCSS_frustumWidth = -1;
-let lastPCSS_nearPlane = -1;
+// Keep the shader local to the floor material so that viewers can share a
+// renderer and vary their softness independently without recompiling.
+const glslOffsets = (offsets: ReadonlyArray<readonly [number, number]>) =>
+    offsets.map(([x, y]) => `vec2(${x.toFixed(2)}, ${y.toFixed(2)})`).join(', ');
 
-function patchPCSS(lightSize: number, frustumWidth: number, nearPlane: number) {
-  if (lightSize === lastPCSS_lightSize &&
-      frustumWidth === lastPCSS_frustumWidth &&
-      nearPlane === lastPCSS_nearPlane) {
-    return false;
+const PCSS_SHADOW_MASK = `
+#if defined(USE_SHADOWMAP) && defined(SHADOWMAP_TYPE_BASIC) && NUM_DIR_LIGHT_SHADOWS > 0
+uniform float pcssScale;
+uniform float pcssMaxInverseDepth;
+const vec2 pcssBlockerOffsets[${pcssBlockerOffsets.length}] =
+    vec2[](${glslOffsets(pcssBlockerOffsets)});
+
+float pcssDepth(sampler2D shadowMap, vec2 uv) {
+  float depth = texture2D(shadowMap, uv).r;
+  #ifdef USE_REVERSED_DEPTH_BUFFER
+    depth = 1.0 - depth;
+  #endif
+  return depth;
+}
+
+// Interpolate the comparison results, rather than interpolating the depths.
+float pcssCompare(sampler2D shadowMap, vec2 uv, float z, vec2 size, vec2 texel) {
+  vec2 samplePoint = uv * size - 0.5;
+  vec2 base = (floor(samplePoint) + 0.5) * texel;
+  vec2 weight = fract(samplePoint);
+  float a = step(z, pcssDepth(shadowMap, base));
+  float b = step(z, pcssDepth(shadowMap, base + vec2(texel.x, 0.0)));
+  float c = step(z, pcssDepth(shadowMap, base + vec2(0.0, texel.y)));
+  float d = step(z, pcssDepth(shadowMap, base + texel));
+  return mix(mix(a, b, weight.x), mix(c, d, weight.x), weight.y);
+}
+
+// Reconstruct coverage between samples on a fixed lattice so a broad penumbra
+// has a continuous gradient even when its samples are several texels apart.
+float pcssFilter(sampler2D shadowMap, vec2 point, float z, vec2 texel, float spacing) {
+  float origin = floor(0.5 * spacing);
+  vec2 grid = (point - origin) / spacing;
+  vec2 cell = floor(grid + 0.5);
+  vec2 offset = grid - cell;
+  vec2 low = 0.5 - offset;
+  vec2 high = 0.5 + offset;
+  vec2 w0 = 0.5 * low * low;
+  vec2 w1 = 0.75 - offset * offset;
+  vec2 w2 = 0.5 * high * high;
+  vec3 weightX = vec3(w0.x, w1.x, w2.x);
+  vec3 weightY = vec3(w0.y, w1.y, w2.y);
+  vec2 center = (cell * spacing + origin + 0.5) * texel;
+  vec2 stepUV = spacing * texel;
+  float visibility = 0.0;
+  for (int y = 0; y < 3; ++y) {
+    for (int x = 0; x < 3; ++x) {
+      vec2 sampleUV = center + (vec2(x, y) - 1.0) * stepUV;
+      visibility += weightX[x] * weightY[y] * step(z, pcssDepth(shadowMap, sampleUV));
+    }
   }
-  lastPCSS_lightSize = lightSize;
-  lastPCSS_frustumWidth = frustumWidth;
-  lastPCSS_nearPlane = nearPlane;
-
-  const pcssShader = `
-    #define LIGHT_WORLD_SIZE ${lightSize.toFixed(6)}
-    #define LIGHT_FRUSTUM_WIDTH ${frustumWidth.toFixed(6)}
-    #define LIGHT_SIZE_UV (LIGHT_WORLD_SIZE / LIGHT_FRUSTUM_WIDTH)
-    #define NEAR_PLANE ${nearPlane.toFixed(6)}
-    #define NUM_SAMPLES 10
-    #define NUM_RINGS 5
-    #define BLOCKER_SEARCH_NUM_SAMPLES NUM_SAMPLES
-    vec2 poissonDisk[NUM_SAMPLES];
-    void initPoissonSamples(const in vec2 randomSeed){
-      float ANGLE_STEP = PI2 * float(NUM_RINGS) / float(NUM_SAMPLES);
-      float INV_NUM_SAMPLES = 1.0 / float(NUM_SAMPLES);
-      float angle = rand(randomSeed) * PI2;
-      float radius = INV_NUM_SAMPLES;
-      float radiusStep = radius;
-      for(int i = 0; i < NUM_SAMPLES; i++){
-        poissonDisk[i] = vec2(cos(angle), sin(angle)) * pow(radius, 0.75);
-        radius += radiusStep; angle += ANGLE_STEP;
-      }
-    }
-    float penumbraSize(const in float zReceiver, const in float zBlocker){
-      return (zReceiver - zBlocker) / zBlocker;
-    }
-    float findBlocker(sampler2D shadowMap, const in vec2 uv, const in float zReceiver){
-      float searchRadius = LIGHT_SIZE_UV * (zReceiver - NEAR_PLANE) / zReceiver;
-      float blockerDepthSum = 0.0; int numBlockers = 0;
-      for(int i = 0; i < BLOCKER_SEARCH_NUM_SAMPLES; i++){
-        float d = texture2D(shadowMap, uv + poissonDisk[i] * searchRadius).r;
-        if(d < zReceiver){ blockerDepthSum += d; numBlockers++; }
-      }
-      if(numBlockers == 0) return -1.0;
-      return blockerDepthSum / float(numBlockers);
-    }
-    float PCF_Filter(sampler2D shadowMap, vec2 uv, float zReceiver, float filterRadius){
-      float sum = 0.0; float depth;
-      #pragma unroll_loop_start
-      for(int i = 0; i < 10; i++){
-        depth = texture2D(shadowMap, uv + poissonDisk[i] * filterRadius).r;
-        if(zReceiver <= depth) sum += 1.0;
-      }
-      #pragma unroll_loop_end
-      #pragma unroll_loop_start
-      for(int i = 0; i < 10; i++){
-        depth = texture2D(shadowMap, uv + -poissonDisk[i].yx * filterRadius).r;
-        if(zReceiver <= depth) sum += 1.0;
-      }
-      #pragma unroll_loop_end
-      return sum / (2.0 * float(10));
-    }
-    float PCSS(sampler2D shadowMap, vec4 coords){
-      vec2 uv = coords.xy; float zReceiver = coords.z;
-      initPoissonSamples(uv);
-      float avgBlockerDepth = findBlocker(shadowMap, uv, zReceiver);
-      if(avgBlockerDepth == -1.0) return 1.0;
-      float penumbraRatio = penumbraSize(zReceiver, avgBlockerDepth);
-      float filterRadius = penumbraRatio * LIGHT_SIZE_UV * NEAR_PLANE / zReceiver;
-      return PCF_Filter(shadowMap, uv, zReceiver, filterRadius);
-    }
-  `;
-  let shader = originalShadowChunk;
-  shader = shader.replace('#ifdef USE_SHADOWMAP', '#ifdef USE_SHADOWMAP' + pcssShader);
-  shader = shader.replace(
-      '\t\t\tif ( frustumTest ) {\n\t\t\t\tfloat depth = texture2D( shadowMap, shadowCoord.xy ).r;',
-      '\t\t\tif ( frustumTest ) {\nreturn PCSS( shadowMap, shadowCoord );\n\t\t\t\tfloat depth = texture2D( shadowMap, shadowCoord.xy ).r;');
-  ShaderChunk.shadowmap_pars_fragment = shader;
-  return true;
+  return visibility;
 }
 
-function restoreShadowChunk() {
-  ShaderChunk.shadowmap_pars_fragment = originalShadowChunk;
-  lastPCSS_lightSize = -1;
-  lastPCSS_frustumWidth = -1;
-  lastPCSS_nearPlane = -1;
+float pcssVisibility(sampler2D shadowMap, vec3 coord, vec2 size) {
+  vec2 uv = coord.xy;
+  float z = coord.z;
+  if (z <= 0.0 || z > 1.0 || any(lessThan(uv, vec2(0))) || any(greaterThan(uv, vec2(1)))) {
+    return 1.0;
+  }
+
+  vec2 texel = 1.0 / size;
+  float texelWidth = max(texel.x, texel.y);
+  float inverseReceiver = 1.0 / max(z, ${pcssDepthEpsilon});
+  float searchRadius = pcssScale * (pcssMaxInverseDepth - inverseReceiver);
+  if (searchRadius <= texelWidth) {
+    return pcssCompare(shadowMap, uv, z, size, texel);
+  }
+
+  float blockerSum = 0.0;
+  float blockerCount = 0.0;
+  for (int i = 0; i < ${pcssBlockerOffsets.length}; ++i) {
+    float depth = pcssDepth(shadowMap, uv + pcssBlockerOffsets[i] * searchRadius);
+    float blocked = 1.0 - step(z, depth);
+    blockerSum += blocked * depth;
+    blockerCount += blocked;
+  }
+  if (blockerCount == 0.0) {
+    return 1.0;
+  }
+
+  float inverseBlocker = blockerCount / max(blockerSum, ${pcssDepthEpsilon} * blockerCount);
+  float radius = pcssScale * (inverseBlocker - inverseReceiver);
+  if (radius <= texelWidth) {
+    return pcssCompare(shadowMap, uv, z, size, texel);
+  }
+
+  // The filter variance grows with the square of the spacing. Interpolating
+  // that variance gives a smooth radius change while favoring the denser grid.
+  float radiusInTexels = radius / texelWidth;
+  float spacing = exp2(floor(log2(radiusInTexels)));
+  float ratio = radiusInTexels / spacing;
+  float blend = (ratio * ratio - 1.0) / 3.0;
+  vec2 point = uv * size - 0.5;
+  float fine = spacing == 1.0 ? pcssCompare(shadowMap, uv, z, size, texel) :
+      pcssFilter(shadowMap, point, z, texel, spacing);
+  float coarse = pcssFilter(shadowMap, point, z, texel, spacing * 2.0);
+  return mix(fine, coarse, blend);
 }
+
+float modelViewerPCSSShadow(
+    sampler2D shadowMap, vec2 size, float intensity, float bias, float radius, vec4 coord) {
+  vec3 projected = coord.xyz / coord.w;
+  #ifdef USE_REVERSED_DEPTH_BUFFER
+    projected.z = 1.0 - projected.z;
+  #endif
+  projected.z += bias;
+  return mix(1.0, pcssVisibility(shadowMap, projected, size), intensity);
+}
+
+${ShaderChunk.shadowmask_pars_fragment.replace(
+    'getShadow( directionalShadowMap', 'modelViewerPCSSShadow( directionalShadowMap')}
+#else
+#include <shadowmask_pars_fragment>
+#endif
+`;
 
 const _center = new Vector3();
+const _lightDirection = new Vector3();
 
 /**
  * Dual-mode shadow:
@@ -205,8 +239,8 @@ export class Shadow extends Object3D {
 
   // ─── PCSS mode state ───
   private light: DirectionalLight|null = null;
-  private frustumWidth = 1;
-  private nearPlane = 0.5;
+  private readonly pcssScale = {value: 0};
+  private readonly pcssMaxInverseDepth = {value: 0};
   private castShadowSet = false;
 
   constructor(scene: ModelScene, softness: number, side: Side) {
@@ -221,7 +255,6 @@ export class Shadow extends Object3D {
   private initBasicMode() {
     this.disposeMode();
     this.mode = 'basic';
-    restoreShadowChunk();
 
     this.basicCamera = new OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0, 1);
     this.basicCamera.rotation.x = Math.PI / 2;
@@ -287,6 +320,12 @@ export class Shadow extends Object3D {
 
     const plane = new PlaneGeometry(1, 1);
     const shadowMat = new ShadowMaterial({opacity: 0, transparent: true});
+    shadowMat.onBeforeCompile = (shader) => {
+      shader.uniforms.pcssScale = this.pcssScale;
+      shader.uniforms.pcssMaxInverseDepth = this.pcssMaxInverseDepth;
+      shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <shadowmask_pars_fragment>', PCSS_SHADOW_MASK);
+    };
     this.floor = new Mesh(plane, shadowMat);
     this.floor.receiveShadow = true;
     this.floor.userData.noHit = true;
@@ -331,7 +370,6 @@ export class Shadow extends Object3D {
 
     // Dispose PCSS mode resources
     if (this.light != null) {
-      restoreShadowChunk();
       this.light.shadow.map?.dispose();
       this.light.target.removeFromParent();
       this.light.removeFromParent();
@@ -451,8 +489,9 @@ export class Shadow extends Object3D {
     this.softness = softness;
     if (this.mode === 'basic') {
       this.updateBasicSoftness();
-    } else {
-      this.updatePCSSPatch();
+    } else if (this.light != null) {
+      const near = this.light.shadow.camera.near;
+      this.pcssScale.value = Math.max(0, softness) * 0.05 * near / PCSS_FRUSTUM_SCALE;
     }
     this.needsUpdate = true;
   }
@@ -491,11 +530,10 @@ export class Shadow extends Object3D {
     if (this.mode === 'basic') {
       this.floor.position.z = -offset + this.gap();
     } else {
-      if (this.side === 'bottom') {
-        this.floor.position.y = this.boundingBox.min.y - offset + this.gap();
-      } else {
-        this.floor.position.z = this.boundingBox.min.z - offset + this.gap();
-      }
+      const normal = this.side === 'bottom' ? 'y' : 'z';
+      this.floor.position[normal] =
+          this.boundingBox.min[normal] - offset + this.gap();
+      this.updatePCSSReceiver();
     }
   }
 
@@ -697,19 +735,10 @@ export class Shadow extends Object3D {
 
   private setupPCSSScene(side: Side) {
     if (this.light == null) return;
-    this.boundingBox.getCenter(_center);
-    const min = this.boundingBox.min;
-
-    if (side === 'bottom') {
-      this.floor.rotation.x = -Math.PI / 2;
-      this.floor.position.set(_center.x, min.y, _center.z);
-      this.floor.scale.set(this.size.x * 10, this.size.z * 10, 1);
-    } else {
-      this.floor.rotation.x = 0;
-      this.floor.position.set(_center.x, _center.y, min.z);
-      this.floor.scale.set(this.size.x * 10, this.size.y * 10, 1);
-    }
-
+    const bottom = side === 'bottom';
+    this.floor.rotation.x = bottom ? -Math.PI / 2 : 0;
+    const normal = bottom ? 'y' : 'z';
+    this.floor.position[normal] = this.boundingBox.min[normal];
     this.updatePCSSLightPosition();
   }
 
@@ -728,58 +757,60 @@ export class Shadow extends Object3D {
     this.light.updateMatrixWorld();
     this.light.target.updateMatrixWorld();
 
-    const halfSize = this.maxDimension * 3;
-    const newFrustumWidth = halfSize * 2;
-    const newNearPlane = this.light.shadow.camera.near;
-
-    this.light.shadow.camera.left = -halfSize;
-    this.light.shadow.camera.right = halfSize;
-    this.light.shadow.camera.top = halfSize;
-    this.light.shadow.camera.bottom = -halfSize;
-    this.light.shadow.camera.far = radius * 20;
-    this.light.shadow.camera.updateProjectionMatrix();
+    const halfSize = this.maxDimension * PCSS_FRUSTUM_SCALE / 2;
+    const camera = this.light.shadow.camera;
+    camera.left = -halfSize;
+    camera.right = halfSize;
+    camera.top = halfSize;
+    camera.bottom = -halfSize;
+    camera.far = radius * 20;
+    camera.updateProjectionMatrix();
     this.light.shadow.needsUpdate = true;
 
-    if (newFrustumWidth !== this.frustumWidth || newNearPlane !== this.nearPlane) {
-      this.frustumWidth = newFrustumWidth;
-      this.nearPlane = newNearPlane;
-      this.updatePCSSPatch();
-    }
+    // Bound the blocker search by the closest possible caster inside the model
+    // bounds. This keeps the sparse search close to the actual penumbra.
+    const nearestDepth =
+        (radius - this.size.length() / 2 - camera.near) / (camera.far - camera.near);
+    this.pcssMaxInverseDepth.value = 1 / Math.max(nearestDepth, pcssDepthEpsilon);
+    this.updatePCSSReceiver();
   }
 
-  private updatePCSSPatch() {
-    const lightSize = this.softness * this.maxDimension * 0.05;
-    const changed = patchPCSS(lightSize, this.frustumWidth, this.nearPlane);
-    if (!changed) return;
+  private updatePCSSReceiver() {
+    if (this.light == null) return;
+    const bottom = this.side === 'bottom';
+    const normal = bottom ? 'y' : 'z';
+    const tangent = bottom ? 'z' : 'y';
+    const center = this.light.target.position;
+    const direction = _lightDirection.subVectors(this.light.position, center);
+    const distance = direction.length();
+    direction.divideScalar(distance);
 
-    const recompileId = Date.now();
-    const forceRecompile = (m: any) => {
-      m.defines = m.defines || {};
-      m.defines.PCSS_VERSION = recompileId;
-      m.needsUpdate = true;
-    };
-    forceRecompile(this.floor.material);
+    // Project the model bounds, with room for the penumbra, onto the receiver.
+    // The light's far plane bounds the reach even at a grazing angle.
+    const padding = this.maxDimension / 2;
+    const height = Math.max(0, this.boundingBox.max[normal] - this.floor.position[normal]);
+    const maxTravel = this.light.shadow.camera.far - distance + this.size.length() / 2;
+    const travel = direction[normal] < 0 ? 0 : Math.min(
+        (height + padding) / Math.max(direction[normal], pcssDepthEpsilon),
+        maxTravel);
+    const shiftX = -travel * direction.x;
+    const shiftY = -travel * direction[tangent];
 
-    if (this.parent != null) {
-      this.parent.traverse((object) => {
-        if ((object as Mesh).isMesh) {
-          const meshMat = (object as Mesh).material;
-          if (Array.isArray(meshMat)) {
-            meshMat.forEach(forceRecompile);
-          } else if (meshMat != null) {
-            forceRecompile(meshMat);
-          }
-        }
-      });
-    }
+    const halfWidth = Math.max(this.size.x * 5, this.size.x / 2 + padding);
+    const halfHeight = Math.max(this.size[tangent] * 5, this.size[tangent] / 2 + padding);
+    const extraWidth = Math.max(0, Math.abs(shiftX) + this.size.x / 2 + padding - halfWidth);
+    const extraHeight = Math.max(
+        0, Math.abs(shiftY) + this.size[tangent] / 2 + padding - halfHeight);
+    this.floor.position.x = center.x + Math.sign(shiftX) * extraWidth / 2;
+    this.floor.position[tangent] = center[tangent] + Math.sign(shiftY) * extraHeight / 2;
+    this.floor.scale.set(2 * halfWidth + extraWidth, 2 * halfHeight + extraHeight, 1);
   }
 
   private renderPCSS(
       renderer: WebGLRenderer|WebGPURenderer, scene: Scene,
       gpu?: WebGPUShadowMaterials) {
     if (this.light == null) return;
-    gpu?.setPCSS(this.light, this.softness * this.maxDimension * 0.05 / this.frustumWidth,
-                 this.nearPlane);
+    gpu?.setPCSS(this.light, this.pcssScale.value, this.pcssMaxInverseDepth.value);
 
     if (!renderer.shadowMap.enabled) {
       renderer.shadowMap.enabled = true;

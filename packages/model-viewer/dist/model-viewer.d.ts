@@ -892,7 +892,7 @@ interface WebGPUShadowMaterials {
     blur: Material$4;
     setDepth(camera: OrthographicCamera$1, opacity: number): void;
     setBlur(source: Texture$4, x: number, y: number): void;
-    setPCSS(light: DirectionalLight, lightSize: number, nearPlane: number): void;
+    setPCSS(light: DirectionalLight, scale: number, maxInverseDepth: number): void;
     withPCSSShadow(light: DirectionalLight, render: () => void): void;
 }
 /**
@@ -928,8 +928,8 @@ declare class Shadow extends Object3D {
     private verticalBlurMaterial;
     private blurPlane;
     private light;
-    private frustumWidth;
-    private nearPlane;
+    private readonly pcssScale;
+    private readonly pcssMaxInverseDepth;
     private castShadowSet;
     constructor(scene: ModelScene, softness: number, side: Side);
     private initBasicMode;
@@ -955,7 +955,7 @@ declare class Shadow extends Object3D {
     private blurShadow;
     private setupPCSSScene;
     private updatePCSSLightPosition;
-    private updatePCSSPatch;
+    private updatePCSSReceiver;
     private renderPCSS;
 }
 

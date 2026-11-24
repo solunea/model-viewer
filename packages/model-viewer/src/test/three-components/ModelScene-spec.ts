@@ -16,12 +16,13 @@
 import '../renderer-gate.js';
 
 import {expect} from 'chai';
-import {LinearSRGBColorSpace, LoopRepeat, Matrix4, Mesh, MeshBasicMaterial, SphereGeometry, SRGBColorSpace, Texture, Vector3} from 'three';
+import {BoxGeometry, LinearSRGBColorSpace, LoopRepeat, Matrix4, Mesh, MeshBasicMaterial, OrthographicCamera, SphereGeometry, SRGBColorSpace, Texture, Vector3, WebGLRenderer, WebGLRenderTarget} from 'three';
 
 import {$scene} from '../../model-viewer-base.js';
 import {ModelViewerElement} from '../../model-viewer.js';
 import {GroundedSkybox} from '../../three-components/GroundedSkybox.js';
 import {ModelScene} from '../../three-components/ModelScene.js';
+import {Shadow} from '../../three-components/Shadow.js';
 import {assetPath} from '../helpers.js';
 
 suite('ModelScene', () => {
@@ -179,6 +180,69 @@ suite('ModelScene', () => {
 
       expect((scene.shadow! as any).phi).to.be.equal(Math.PI / 2);
     });
+
+    test('extends the receiver in the direction of a grazing shadow', () => {
+      const phi = 85 * Math.PI / 180;
+      scene.setShadowOrbit(-Math.PI / 2, phi);
+      const floor = scene.shadow!.getObjectByName('ShadowFloor')!;
+      const {min, max} = scene.boundingBox;
+      expect(floor.position.x + floor.scale.x / 2).to.be.greaterThan(
+          max.x + (max.y - min.y) * Math.tan(phi));
+      expect(floor.position.x - floor.scale.x / 2).to.be.lessThan(min.x);
+
+      const grazingWidth = floor.scale.x;
+      scene.setShadowOrbit(-Math.PI / 2, Math.PI / 6);
+      expect(floor.scale.x).to.be.lessThan(grazingWidth);
+    });
+  });
+
+  test('renders a smooth PCSS penumbra and updates it with softness', () => {
+    const caster = new Mesh(new BoxGeometry(0.7, 0.075, 0.7), new MeshBasicMaterial());
+    caster.position.y = 0.8;
+    scene.target.add(caster);
+    scene.boundingBox.set(new Vector3(-0.35, 0, -0.35), new Vector3(0.35, 0.85, 0.35));
+
+    const renderer = new WebGLRenderer();
+    const target = new WebGLRenderTarget(256, 64);
+    const camera = new OrthographicCamera(-0.9, 0.9, 0.25, -0.25, 0.1, 10);
+    camera.up.set(0, 0, -1);
+    camera.position.set(1.65, 3, 0);
+    camera.lookAt(1.65, 0, 0);
+    renderer.setClearColor(0xffffff);
+
+    const shadow = new Shadow(scene, 1, 'bottom');
+    shadow.setOrbit(-Math.PI / 2, 55 * Math.PI / 180);
+    shadow.setIntensity(1);
+    const pixels = new Uint8Array(target.width * 4);
+    const captureRow = (softness: number) => {
+      shadow.setSoftness(softness);
+      shadow.render(renderer, scene);
+      renderer.setRenderTarget(target);
+      renderer.render(scene, camera);
+      renderer.readRenderTargetPixels(target, 0, 32, target.width, 1, pixels);
+      return pixels.filter((_, i) => i % 4 === 0);
+    };
+
+    try {
+      const soft = captureRow(1);
+      const hard = captureRow(0);
+      const partial = (values: Uint8Array) =>
+          values.filter(value => value > 10 && value < 245).length;
+      expect(partial(soft)).to.be.greaterThan(partial(hard) + 12);
+
+      let variation = 0;
+      for (let i = 1; i + 1 < soft.length; ++i) {
+        variation += Math.abs(soft[i - 1] - 2 * soft[i] + soft[i + 1]);
+      }
+      expect(variation).to.be.lessThan(255);
+    } finally {
+      shadow.dispose();
+      caster.removeFromParent();
+      caster.geometry.dispose();
+      caster.material.dispose();
+      target.dispose();
+      renderer.dispose();
+    }
   });
 
   suite('skybox interpolation', () => {
