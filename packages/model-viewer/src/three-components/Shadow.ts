@@ -40,7 +40,10 @@ const DEFAULT_SHADOW_PHI = 0;
 const LOG_MAX_RESOLUTION = 9;
 const LOG_MIN_RESOLUTION = 6;
 const DEFAULT_HARD_INTENSITY = 0.3;
-const PCSS_FRUSTUM_SCALE = 6;
+
+// Fit the projection around the casters with room for the penumbra.
+const PCSS_FRUSTUM_SCALE = 4;
+const PCSS_MAP_SIZE = 2048;
 
 // ─── Blur shaders (compatible with Three.js r183) ───────────────────
 const BLUR_VERTEX = `varying vec2 vUv;
@@ -315,7 +318,7 @@ export class Shadow extends Object3D {
     this.light.shadow.camera.far = 100;
     this.light.shadow.bias = 0.001;
     this.light.shadow.normalBias = 0.01;
-    this.light.shadow.mapSize.set(1024, 1024);
+    this.light.shadow.mapSize.setScalar(PCSS_MAP_SIZE);
     this.light.name = 'ShadowLight';
 
     const plane = new PlaneGeometry(1, 1);
