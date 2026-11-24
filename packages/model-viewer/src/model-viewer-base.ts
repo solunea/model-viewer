@@ -123,7 +123,7 @@ export interface Camera {
 }
 
 export type RenderBackend = 'webgl'|'webgpu';
-export type RenderBackendPreference = 'auto'|'webgl';
+export type RenderBackendPreference = RenderBackend|'auto';
 
 export interface EffectComposerInterface {
   setRenderer(renderer: WebGLRenderer): void;
@@ -201,8 +201,13 @@ export default class ModelViewerElementBase extends ReactiveElement {
   @property({type: Boolean, attribute: 'view-helper'})
   viewHelper = false;
 
-  @property({type: String, attribute: 'render-backend', reflect: true})
-  renderBackend: RenderBackendPreference = 'auto';
+  @property({
+    type: String,
+    attribute: 'render-backend',
+    reflect: true,
+    useDefault: true
+  })
+  renderBackend: RenderBackendPreference = 'webgl';
 
   private renderedBackend: RenderBackend|null = null;
 

@@ -47,9 +47,11 @@ async function start(t, settings = {}) {
       };
     });
   }
+  const markup = settings.backend == null ? html :
+      html.replace('<model-viewer ', `<model-viewer render-backend="${settings.backend}" `);
   await page.route(`${origin}/**`, async route => {
     const {pathname} = new URL(route.request().url());
-    if (pathname === '/') return route.fulfill({contentType: 'text/html', body: html});
+    if (pathname === '/') return route.fulfill({contentType: 'text/html', body: markup});
     const [, directory, ...path] = pathname.split('/');
     const base = directories.get(directory);
     if (!base || path.includes('..')) return route.fulfill({status: 404});
@@ -85,8 +87,17 @@ async function visiblePixels(page) {
   });
 }
 
-test('uses the native backend, can force WebGL and recovers from GPU device loss', async t => {
+test('defaults to WebGL, can opt into WebGPU and recovers from GPU device loss', async t => {
   const {page, errors} = await start(t);
+  await waitBackend(page, 'webgl');
+  assert.ok(await visiblePixels(page) > 100);
+  assert.deepEqual(await page.locator('model-viewer').evaluate(viewer => ({
+    preference: viewer.renderBackend,
+    attribute: viewer.getAttribute('render-backend'),
+    deviceRequested: Boolean(globalThis.testGPUDevice)
+  })), {preference: 'webgl', attribute: null, deviceRequested: false});
+
+  await page.locator('model-viewer').evaluate(viewer => viewer.setAttribute('render-backend', 'webgpu'));
   await waitBackend(page, 'webgpu');
   assert.ok(await visiblePixels(page) > 100);
   const orbit = await page.evaluate(async () => {
@@ -95,10 +106,11 @@ test('uses the native backend, can force WebGL and recovers from GPU device loss
     await viewer.updateComplete;
     viewer.jumpCameraToGoal();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    viewer.renderBackend = 'webgl';
+    viewer.removeAttribute('render-backend');
     return viewer.getCameraOrbit().toString();
   });
   await waitBackend(page, 'webgl');
+  assert.equal(await page.locator('model-viewer').evaluate(viewer => viewer.renderBackend), 'webgl');
   assert.ok(await visiblePixels(page) > 100);
   await page.evaluate(() => document.querySelector('model-viewer').renderBackend = 'auto');
   await waitBackend(page, 'webgpu');
@@ -111,8 +123,9 @@ test('uses the native backend, can force WebGL and recovers from GPU device loss
 });
 
 test('loads the same model on WebGL when WebGPU is unavailable', async t => {
-  const {page, errors} = await start(t, {disableGPU: true});
+  const {page, errors} = await start(t, {backend: 'webgpu', disableGPU: true});
   await waitBackend(page, 'webgl');
+  assert.equal(await page.locator('model-viewer').evaluate(viewer => viewer.renderBackend), 'webgpu');
   assert.ok(await visiblePixels(page) > 100);
   assert.deepEqual(errors, []);
 });
@@ -127,8 +140,7 @@ test('keeps a skinned model renderable across WebGPU and WebGL', async t => {
     viewer.play();
   });
   for (const backend of ['webgpu', 'webgl', 'webgpu']) {
-    await page.evaluate(value => document.querySelector('model-viewer').renderBackend = value,
-        backend === 'webgl' ? 'webgl' : 'auto');
+    await page.evaluate(value => document.querySelector('model-viewer').renderBackend = value, backend);
     await waitBackend(page, backend);
     assert.ok(await visiblePixels(page) > 100);
   }
@@ -136,7 +148,7 @@ test('keeps a skinned model renderable across WebGPU and WebGL', async t => {
 });
 
 test('draws an orbitable contact shadow on WebGPU', async t => {
-  const {page, errors} = await start(t);
+  const {page, errors} = await start(t, {backend: 'webgpu'});
   await waitBackend(page, 'webgpu');
   await page.evaluate(async () => {
     const viewer = document.querySelector('model-viewer');
@@ -147,8 +159,7 @@ test('draws an orbitable contact shadow on WebGPU', async t => {
   assert.equal(await page.locator('model-viewer').evaluate(viewer => viewer.activeRenderBackend), 'webgpu');
   assert.ok(await visiblePixels(page) > 100);
   for (const backend of ['webgl', 'webgpu']) {
-    await page.evaluate(value => document.querySelector('model-viewer').renderBackend = value,
-        backend === 'webgl' ? 'webgl' : 'auto');
+    await page.evaluate(value => document.querySelector('model-viewer').renderBackend = value, backend);
     await waitBackend(page, backend);
     assert.ok(await visiblePixels(page) > 100);
   }
@@ -156,7 +167,7 @@ test('draws an orbitable contact shadow on WebGPU', async t => {
 });
 
 test('renders each built-in effect on WebGPU', async t => {
-  const {page, errors} = await start(t);
+  const {page, errors} = await start(t, {backend: 'webgpu'});
   await waitBackend(page, 'webgpu');
   await page.addScriptTag({type: 'module', url: origin + '/effects/model-viewer-effects.min.js'});
   await page.evaluate(() => customElements.whenDefined('effect-composer'));
@@ -180,7 +191,7 @@ test('renders each built-in effect on WebGPU', async t => {
 });
 
 test('draws a panorama with a mask and a defocus map in the native backend', async t => {
-  const {page, errors} = await start(t);
+  const {page, errors} = await start(t, {backend: 'webgpu'});
   await waitBackend(page, 'webgpu');
   const depth = Buffer.from(encode({
     width: 128, height: 64, channels: 1, data: new Uint8Array(128 * 64).fill(192)

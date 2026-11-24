@@ -241,8 +241,9 @@ export class Renderer extends
 
   private wantsWebGPU(scene: ModelScene): boolean {
     const {effectRenderer, externalRenderer, element} = scene;
-    return element.renderBackend !== 'webgl' && !this.gpuUnavailable &&
-        !this.failedGPUScenes.has(scene) &&
+    const {renderBackend} = element;
+    return (renderBackend === 'webgpu' || renderBackend === 'auto') &&
+        !this.gpuUnavailable && !this.failedGPUScenes.has(scene) &&
         (externalRenderer == null || externalRenderer.prepareRenderBackend != null) &&
         (effectRenderer == null ||
          (effectRenderer.prepareWebGPU != null &&
