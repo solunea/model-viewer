@@ -1970,7 +1970,7 @@ interface Camera {
     projectionMatrix: Array<number>;
 }
 type RenderBackend = 'webgl' | 'webgpu';
-type RenderBackendPreference = 'auto' | 'webgl';
+type RenderBackendPreference = RenderBackend | 'auto';
 interface EffectComposerInterface {
     setRenderer(renderer: WebGLRenderer): void;
     setMainScene(scene: ModelScene): void;
