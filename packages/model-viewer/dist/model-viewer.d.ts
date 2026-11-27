@@ -1197,6 +1197,8 @@ declare class ModelScene extends Scene$1 {
         width: number;
         height: number;
     };
+    get skyboxTransitionActive(): boolean;
+    isUsingSkyboxTexture(texture: Texture$4): boolean;
     setEnvironmentAndSkybox(environment: Texture$4 | null, skybox: Texture$4 | null): void;
     private disposeReplacedTransientTextures;
     private currentSkybox;
@@ -1693,6 +1695,7 @@ interface EnvironmentMapAndSkybox {
 declare class TextureUtils {
     private threeRenderer;
     private readonly readyWebGPU;
+    private readonly isSkyboxInUse;
     lottieLoaderUrl: string;
     private _ldrLoader;
     private _imageLoader;
@@ -1701,11 +1704,12 @@ declare class TextureUtils {
     private generatedEnvironmentMap;
     private generatedEnvironmentMapAlt;
     private skyboxCache;
-    private skyboxCacheUrls;
+    private retiredSkyboxes;
+    private disposed;
     private blurMaterial;
     private blurScene;
     private blurTempTarget;
-    constructor(threeRenderer: WebGLRenderer, readyWebGPU?: () => Promise<WebGPUContext | null> | null);
+    constructor(threeRenderer: WebGLRenderer, readyWebGPU?: () => Promise<WebGPUContext | null> | null, isSkyboxInUse?: (texture: Texture$4) => boolean);
     private ldrLoader;
     private imageLoader;
     private hdrLoader;
@@ -1720,11 +1724,12 @@ declare class TextureUtils {
      * accordingly. `skybox` is a WebGLRenderCubeTarget, and `environmentMap`
      * is a Texture from a WebGLRenderCubeTarget.
      */
-    generateEnvironmentMapAndSkybox(skyboxUrl?: string | null, environmentMapUrl?: string | null, progressCallback?: (progress: number) => void, withCredentials?: boolean, skyboxCacheKey?: string | null): Promise<EnvironmentMapAndSkybox>;
+    generateEnvironmentMapAndSkybox(skyboxUrl?: string | null, environmentMapUrl?: string | null, progressCallback?: (progress: number) => void, withCredentials?: boolean, skyboxCacheKey?: string | null, skyboxMaxWidth?: number | null): Promise<EnvironmentMapAndSkybox>;
     /**
      * Loads an equirect Texture from a given URL, for use as a skybox.
      */
     private loadEquirectFromUrl;
+    releaseRetiredSkyboxes(): void;
     private GenerateEnvironmentMap;
     /**
      * Loads a dynamically generated environment map.
@@ -1850,6 +1855,7 @@ declare class Renderer extends EventDispatcher<{
      */
     preRender(scene: ModelScene, t: number, delta: number, renderer?: WebGLRenderer | WebGPURenderer): void;
     render(t: number, frame?: XRFrame, forceScene?: ModelScene): void;
+    private createTextureUtils;
     private releaseUnusedSkyboxDof;
     dispose(): Array<ModelViewerElementBase>;
     onWebGLContextLost: (event: Event$1) => void;
@@ -2615,9 +2621,15 @@ declare interface ControlsInterface {
     forwardInputEvent(sourceEvent: MouseEvent, type?: string, overrides?: Partial<PointerEventInit & WheelEventInit>): boolean;
 }
 
+interface SkyboxPreloadOptions {
+    cacheKey?: string | null;
+    maxWidth?: number | null;
+}
 declare interface EnvironmentInterface {
     environmentImage: string | null;
     skyboxImage: string | null;
+    skyboxMaxWidth: number | null;
+    readonly skyboxTransitionActive: boolean;
     skyboxDepthImage: string | null;
     skyboxDepthInvert: boolean;
     skyboxDofFocusMode: string;
@@ -2633,7 +2645,7 @@ declare interface EnvironmentInterface {
     skyboxInterpolationDecay: number;
     exposure: number;
     hasBakedShadow(): boolean;
-    preloadSkybox(skyboxImage?: string | null, environmentImage?: string | null): Promise<void>;
+    preloadSkybox(skyboxImage?: string | null, environmentImage?: string | null, options?: SkyboxPreloadOptions): Promise<void>;
 }
 
 declare interface StagingInterface {

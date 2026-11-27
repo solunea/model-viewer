@@ -1,6 +1,7 @@
 import {BufferAttribute, BufferGeometry, Camera, ColorManagement, EquirectangularReflectionMapping, Euler, GLSL3, HalfFloatType, LinearFilter, Matrix4, Mesh, NearestFilter, NoBlending, NoColorSpace, RGFormat, Scene, ShaderMaterial, SRGBColorSpace, SRGBTransfer, Texture, UnsignedByteType, Vector2, WebGLRenderer, WebGLRenderTarget} from 'three';
 
 import type {ModelScene, SkyboxDofFrame} from './ModelScene.js';
+import {skyboxSourceFlipY} from './SkyboxDepth.js';
 
 const MAX_WORK_PIXELS = 520000;
 
@@ -439,7 +440,7 @@ export class SkyboxDof {
     this.common.depthTexture.value = frame.depth;
     this.common.crop.value.set(
         cssWidth / paddedWidth, cssHeight / paddedHeight);
-    this.common.flipDepthY.value = frame.skybox.flipY ? 1 : 0;
+    this.common.flipDepthY.value = skyboxSourceFlipY(frame.skybox) ? 1 : 0;
     this.common.depthIs16Bit.value = frame.bitDepth === 16 ? 1 : 0;
     this.common.invertDepth.value = frame.invert ? 1 : 0;
     this.common.focus.value = frame.focus;

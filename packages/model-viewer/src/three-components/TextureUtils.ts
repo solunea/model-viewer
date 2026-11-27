@@ -28,6 +28,13 @@ export interface EnvironmentMapAndSkybox {
   skybox: Texture|null;
 }
 
+interface CachedSkybox {
+  url: string;
+  withCredentials: boolean;
+  maxWidth: number|null;
+  texture: Promise<Texture>;
+}
+
 const GENERATED_SIGMA = 0.04;
 // The maximum length of the blur for loop. Smaller sigmas will use fewer
 // samples and exit early, but not recompile the shader.
@@ -78,8 +85,9 @@ export default class TextureUtils {
   private generatedEnvironmentMap: Promise<CubeTexture>|null = null;
   private generatedEnvironmentMapAlt: Promise<CubeTexture>|null = null;
 
-  private skyboxCache = new Map<string, Promise<Texture>>();
-  private skyboxCacheUrls = new Map<string, string>();
+  private skyboxCache = new Map<string, CachedSkybox>();
+  private retiredSkyboxes = new Set<Texture>();
+  private disposed = false;
 
   private blurMaterial: ShaderMaterial|null = null;
   private blurScene: Scene|null = null;
@@ -88,7 +96,9 @@ export default class TextureUtils {
   constructor(
       private threeRenderer: WebGLRenderer,
       private readonly readyWebGPU: () => Promise<WebGPUContext|null>|null =
-          () => null) {
+          () => null,
+      private readonly isSkyboxInUse: (texture: Texture) => boolean =
+          () => false) {
   }
 
   private ldrLoader(withCredentials: boolean): TextureLoader {
@@ -254,9 +264,36 @@ export default class TextureUtils {
   }
 
   private async loadTransientEquirect(
-      url: string, withCredentials: boolean): Promise<Texture> {
+      url: string, withCredentials: boolean,
+      maxWidth: number|null): Promise<Texture> {
     const texture = await this.loadImage(url, withCredentials);
-    texture.name = url;
+    if (maxWidth != null) {
+      texture.flipY = true;
+      const image = texture.image as HTMLImageElement;
+      if (maxWidth > 0 && image.width > maxWidth) {
+        const height = Math.max(1, Math.round(image.height * maxWidth / image.width));
+        try {
+          // Finish resizing and flipping before the synchronous GPU upload.
+          texture.image = await createImageBitmap(image, {
+            imageOrientation: 'flipY',
+            resizeWidth: maxWidth,
+            resizeHeight: height,
+            resizeQuality: 'medium'
+          });
+          texture.userData.skyboxSourceFlipY = true;
+          texture.flipY = false;
+        } catch {
+          const canvas = document.createElement('canvas');
+          canvas.width = maxWidth;
+          canvas.height = height;
+          const context = canvas.getContext('2d');
+          if (context != null) {
+            context.drawImage(image, 0, 0, maxWidth, height);
+            texture.image = canvas;
+          }
+        }
+      }
+    }
     texture.mapping = EquirectangularReflectionMapping;
 
     if (texture.type !== HalfFloatType) {
@@ -276,7 +313,8 @@ export default class TextureUtils {
       skyboxUrl: string|null = null, environmentMapUrl: string|null = null,
       progressCallback: (progress: number) => void = () => {},
       withCredentials = false,
-      skyboxCacheKey: string|null = null): Promise<EnvironmentMapAndSkybox> {
+      skyboxCacheKey: string|null = null,
+      skyboxMaxWidth: number|null = null): Promise<EnvironmentMapAndSkybox> {
     const useAltEnvironment = environmentMapUrl !== 'legacy';
     if (environmentMapUrl === 'legacy' || environmentMapUrl === 'neutral') {
       environmentMapUrl = null;
@@ -289,7 +327,8 @@ export default class TextureUtils {
     // If we have a skybox URL, attempt to load it as a cubemap
     if (!!skyboxUrl) {
       skyboxLoads = this.loadEquirectFromUrl(
-          skyboxUrl, withCredentials, progressCallback, skyboxCacheKey);
+          skyboxUrl, withCredentials, progressCallback, skyboxCacheKey,
+          skyboxMaxWidth);
     }
 
     if (!!environmentMapUrl) {
@@ -322,43 +361,58 @@ export default class TextureUtils {
   private async loadEquirectFromUrl(
       url: string, withCredentials: boolean,
       progressCallback: (progress: number) => void,
-      cacheKey: string|null = null): Promise<Texture> {
+      cacheKey: string|null = null, maxWidth: number|null = null):
+      Promise<Texture> {
     const isTransientUrl = TRANSIENT_URL_RE.test(url);
-    const resolvedCacheKey = cacheKey != null && cacheKey !== '' ?
-        SKYBOX_CACHE_KEY_PREFIX + cacheKey + (isTransientUrl ? '' : ':' + url) :
-        url;
-
-    if (isTransientUrl && resolvedCacheKey === url) {
-      return this.loadEquirect(url, withCredentials, progressCallback);
+    maxWidth = maxWidth != null && Number.isFinite(maxWidth) && maxWidth >= 0 ?
+        Math.floor(maxWidth) : null;
+    const resolvedCacheKey = isTransientUrl ?
+        (cacheKey ? SKYBOX_CACHE_KEY_PREFIX + cacheKey : null) :
+        JSON.stringify([url, withCredentials, maxWidth, cacheKey]);
+    const cached = resolvedCacheKey == null ? undefined :
+        this.skyboxCache.get(resolvedCacheKey);
+    if (cached?.url === url && cached.maxWidth === maxWidth &&
+        cached.withCredentials === withCredentials) {
+      return cached.texture;
     }
-
-    const previousUrl = this.skyboxCacheUrls.get(resolvedCacheKey);
-    if (previousUrl != null && previousUrl !== url) {
-      const previousTexture = this.skyboxCache.get(resolvedCacheKey);
-      this.skyboxCache.delete(resolvedCacheKey);
-      void previousTexture?.then(texture => texture.dispose(), () => {});
-    }
-
-    if (!this.skyboxCache.has(resolvedCacheKey)) {
-      const loadSkybox = isTransientUrl ?
-          this.loadTransientEquirect(url, withCredentials) :
-          this.loadEquirect(url, withCredentials, progressCallback);
-      const skyboxMapLoads = loadSkybox.then(texture => {
-        texture.userData[SKYBOX_CACHE_KEY] = resolvedCacheKey;
-        return texture;
-      });
-
-      this.skyboxCacheUrls.set(resolvedCacheKey, url);
-      this.skyboxCache.set(resolvedCacheKey, skyboxMapLoads);
-      skyboxMapLoads.catch(() => {
-        if (this.skyboxCache.get(resolvedCacheKey) === skyboxMapLoads) {
-          this.skyboxCache.delete(resolvedCacheKey);
-          this.skyboxCacheUrls.delete(resolvedCacheKey);
+    if (cached != null) {
+      void cached.texture.then((texture) => {
+        // A replaced slot can still be visible during a crossfade.
+        if (!this.disposed && this.isSkyboxInUse(texture)) {
+          this.retiredSkyboxes.add(texture);
+        } else {
+          texture.dispose();
         }
-      });
+      }, () => {});
     }
+    const pending = maxWidth != null ||
+            (isTransientUrl && resolvedCacheKey != null) ?
+        this.loadTransientEquirect(url, withCredentials, maxWidth) :
+        this.loadEquirect(url, withCredentials, progressCallback);
+    if (resolvedCacheKey == null) {
+      return pending;
+    }
+    const texture = pending.then((texture) => {
+      texture.userData[SKYBOX_CACHE_KEY] = resolvedCacheKey;
+      return texture;
+    });
+    const entry = {url, withCredentials, maxWidth, texture};
+    this.skyboxCache.set(resolvedCacheKey, entry);
+    texture.catch(() => {
+      if (this.skyboxCache.get(resolvedCacheKey) === entry) {
+        this.skyboxCache.delete(resolvedCacheKey);
+      }
+    });
+    return texture;
+  }
 
-    return this.skyboxCache.get(resolvedCacheKey)!;
+  releaseRetiredSkyboxes() {
+    for (const texture of this.retiredSkyboxes) {
+      if (!this.isSkyboxInUse(texture)) {
+        this.retiredSkyboxes.delete(texture);
+        texture.dispose();
+      }
+    }
   }
 
   private async GenerateEnvironmentMap(scene: EnvironmentScene, name: string) {
@@ -582,12 +636,13 @@ export default class TextureUtils {
   }
 
   async dispose() {
-    for (const [, promise] of this.skyboxCache) {
-      const skybox = await promise;
-      skybox.dispose();
-    }
+    this.disposed = true;
+    const pending = Array.from(this.skyboxCache.values(), ({texture}) =>
+        texture.then((skybox) => skybox.dispose(), () => {}));
     this.skyboxCache.clear();
-    this.skyboxCacheUrls.clear();
+    for (const texture of this.retiredSkyboxes) texture.dispose();
+    this.retiredSkyboxes.clear();
+    await Promise.all(pending);
     if (this.generatedEnvironmentMap != null) {
       (await this.generatedEnvironmentMap).dispose();
       this.generatedEnvironmentMap = null;

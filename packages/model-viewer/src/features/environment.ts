@@ -43,9 +43,16 @@ interface SkyboxDepthRequest {
   image: SkyboxDepthImage|null;
 }
 
+export interface SkyboxPreloadOptions {
+  cacheKey?: string|null;
+  maxWidth?: number|null;
+}
+
 export declare interface EnvironmentInterface {
   environmentImage: string|null;
   skyboxImage: string|null;
+  skyboxMaxWidth: number|null;
+  readonly skyboxTransitionActive: boolean;
   skyboxDepthImage: string|null;
   skyboxDepthInvert: boolean;
   skyboxDofFocusMode: string;
@@ -62,7 +69,8 @@ export declare interface EnvironmentInterface {
   exposure: number;
   hasBakedShadow(): boolean;
   preloadSkybox(
-      skyboxImage?: string|null, environmentImage?: string|null): Promise<void>;
+      skyboxImage?: string|null, environmentImage?: string|null,
+      options?: SkyboxPreloadOptions): Promise<void>;
 }
 
 export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
@@ -73,6 +81,15 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     @property({type: String, attribute: 'skybox-image'})
     skyboxImage: string|null = null;
+
+    // Use the same orientation as a regular skybox for a source image.
+    // Zero keeps its original size, while null keeps the default loading path.
+    @property({type: Number, attribute: 'skybox-max-width'})
+    skyboxMaxWidth: number|null = null;
+
+    get skyboxTransitionActive(): boolean {
+      return this[$scene].skyboxTransitionActive;
+    }
 
     @property({type: String, attribute: 'skybox-depth-image'})
     skyboxDepthImage: string|null = null;
@@ -195,6 +212,7 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
       if ((changedProperties.has('environmentImage') ||
            changedProperties.has('skyboxImage') ||
+           changedProperties.has('skyboxMaxWidth') ||
            changedProperties.has('skyboxOnly')) &&
           this[$shouldAttemptPreload]()) {
         if (!this.loaded && this.src == null && this.panoramaSource != null) {
@@ -300,7 +318,11 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
     async preloadSkybox(
         skyboxImage: string|null = this.skyboxImage,
-        environmentImage: string|null = this.environmentImage): Promise<void> {
+        environmentImage: string|null = this.environmentImage,
+        {
+          cacheKey = this.getSkyboxCacheKey(skyboxImage),
+          maxWidth = this.skyboxMaxWidth
+        }: SkyboxPreloadOptions = {}): Promise<void> {
       const {textureUtils} = this[$renderer];
       if (textureUtils == null) {
         return;
@@ -308,13 +330,17 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
 
       await textureUtils.generateEnvironmentMapAndSkybox(
           deserializeUrl(skyboxImage), environmentImage, () => {},
-          this.withCredentials, this.getSkyboxCacheKey(skyboxImage));
+          this.withCredentials, cacheKey, maxWidth);
     }
 
     async[$updateEnvironment]() {
-      const {skyboxImage, environmentImage} = this;
+      const {skyboxImage, environmentImage, skyboxMaxWidth} = this;
       const skyboxUrl = deserializeUrl(skyboxImage);
       const request = ++this.environmentRequest;
+      const isCurrent = () => request === this.environmentRequest &&
+          skyboxImage === this.skyboxImage &&
+          environmentImage === this.environmentImage &&
+          Object.is(skyboxMaxWidth, this.skyboxMaxWidth);
       this.updateSkyboxDofOptions();
       this.refreshSkyboxDepth();
 
@@ -334,19 +360,20 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
                 environmentImage,
                 (progress: number) => updateEnvProgress(clamp(progress, 0, 1)),
                 this.withCredentials,
-                this.getSkyboxCacheKey(skyboxImage));
+                this.getSkyboxCacheKey(skyboxImage),
+                skyboxMaxWidth);
 
-        if (request !== this.environmentRequest || skyboxImage !== this.skyboxImage ||
-            environmentImage !== this.environmentImage) {
+        if (!isCurrent()) {
           return;
         }
         const environmentChanged = this[$currentEnvironmentMap] !== environmentMap;
         this[$currentEnvironmentMap] = environmentMap;
         if (skybox != null) {
           // When using the same environment and skybox, use the environment as
-          // it gives HDR filtering.
+          // it gives HDR filtering. Keep an explicitly sized skybox separate.
           this[$currentBackground] =
-              skybox.name === environmentMap.name ? environmentMap : skybox;
+              skyboxMaxWidth == null && skybox.name === environmentMap.name ?
+                  environmentMap : skybox;
         } else {
           this[$currentBackground] = null;
         }
@@ -359,8 +386,7 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
           this.dispatchEvent(new CustomEvent('environment-change'));
         }
       } catch (errorOrPromise) {
-        if (request === this.environmentRequest && skyboxImage === this.skyboxImage &&
-            environmentImage === this.environmentImage && errorOrPromise instanceof Error) {
+        if (isCurrent() && errorOrPromise instanceof Error) {
           this[$scene].setEnvironmentAndSkybox(null, null);
           throw errorOrPromise;
         }

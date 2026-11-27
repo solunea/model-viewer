@@ -30,7 +30,7 @@ import {Hotspot} from './Hotspot.js';
 import {Shadow, WebGPUShadowMaterials} from './Shadow.js';
 import type {WebGPURenderer} from 'three/webgpu';
 import type {PanoramaAreas} from './PanoramaAreas.js';
-import {depthTexture, sampleSkyboxDepth, SkyboxDepthImage} from './SkyboxDepth.js';
+import {depthTexture, sampleSkyboxDepth, SkyboxDepthImage, skyboxSourceFlipY} from './SkyboxDepth.js';
 import {SKYBOX_CACHE_KEY} from './TextureUtils.js';
 
 export const GROUNDED_SKYBOX_SIZE = 10;
@@ -863,6 +863,16 @@ export class ModelScene extends Scene {
     return {width: this.width, height: this.height};
   }
 
+  get skyboxTransitionActive(): boolean {
+    return this.skyboxTransition?.parent != null;
+  }
+
+  isUsingSkyboxTexture(texture: Texture): boolean {
+    return this.environment === texture || this.currentSkybox() === texture ||
+        (this.skyboxTransition?.parent != null &&
+         this.skyboxTransition.material.map === texture);
+  }
+
   setEnvironmentAndSkybox(environment: Texture|null, skybox: Texture|null) {
     if (this.element[$renderer].arRenderer.presentedScene === this) {
       return;
@@ -1071,7 +1081,7 @@ export class ModelScene extends Scene {
     skyboxDofDirection.copy(direction).transformDirection(skyboxDofRotation);
     const d = sampleSkyboxDepth(
         depth.image, skyboxDofDirection.x, skyboxDofDirection.y,
-        skyboxDofDirection.z, depth.color.flipY);
+        skyboxDofDirection.z, skyboxSourceFlipY(depth.color));
     return this.skyboxDofDepthInvert ? 1 - d : d;
   }
 
@@ -1170,6 +1180,7 @@ export class ModelScene extends Scene {
   private clearSkyboxTransition() {
     if (this.skyboxTransition != null) {
       this.skyboxTransition.removeFromParent();
+      this.skyboxTransition.material.map = null;
     }
     this.skyboxTransitionOpacity = 0;
     this.skyboxTransitionGoal = 0;

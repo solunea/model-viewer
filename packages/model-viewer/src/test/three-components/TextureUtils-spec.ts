@@ -16,10 +16,11 @@
 import '../renderer-gate.js';
 
 import {expect} from 'chai';
-import {Cache, CubeReflectionMapping, EquirectangularReflectionMapping, WebGLRenderer} from 'three';
+import {Cache, CubeReflectionMapping, EquirectangularReflectionMapping, Texture, WebGLRenderer} from 'three';
 
 import {CachingGLTFLoader} from '../../three-components/CachingGLTFLoader.js';
 import {Renderer} from '../../three-components/Renderer.js';
+import {skyboxSourceFlipY} from '../../three-components/SkyboxDepth.js';
 import TextureUtils from '../../three-components/TextureUtils.js';
 import {assetPath} from '../helpers.js';
 
@@ -276,13 +277,56 @@ suite('TextureUtils', () => {
       }
 
       expect(textureUtilsAny.skyboxCache.size).to.equal(0);
-      expect(textureUtilsAny.skyboxCacheUrls.size).to.equal(0);
 
       const textures = await textureUtils.generateEnvironmentMapAndSkybox(
           'blob:retry', null, () => {}, false, 'panorama');
       expect(textures.skybox!.name).to.equal('blob:retry');
       expect(attempts).to.equal(2);
       expect(textureUtilsAny.skyboxCache.size).to.equal(1);
+    });
+
+    test('caches the original skybox orientation at the requested size', async () => {
+      const image = document.createElement('canvas');
+      image.width = 8;
+      image.height = 4;
+      const source = image.toDataURL();
+      const load = (width: number|null) =>
+          textureUtils.generateEnvironmentMapAndSkybox(
+              source, null, () => {}, false, 'panorama', width);
+
+      const legacy = (await load(null)).skybox!;
+      expect(legacy.flipY).to.equal(false);
+      const fullSize = (await load(0)).skybox!;
+      expect(fullSize.flipY).to.equal(true);
+      expect((fullSize.image as HTMLImageElement).width).to.equal(8);
+      const resized = (await load(4)).skybox!;
+      expect(skyboxSourceFlipY(resized)).to.equal(true);
+      const bitmap = resized.image as ImageBitmap|HTMLCanvasElement;
+      expect([bitmap.width, bitmap.height]).to.deep.equal([4, 2]);
+      expect((await load(4)).skybox).to.equal(resized);
+    });
+
+    test('keeps a replaced texture alive while it is still displayed', async () => {
+      let displayed: Texture|null = null;
+      textureUtils = new TextureUtils(
+          threeRenderer, () => null, (texture) => texture === displayed);
+      const image = document.createElement('canvas');
+      image.width = image.height = 2;
+      const load = (url: string) => textureUtils.generateEnvironmentMapAndSkybox(
+          url, null, () => {}, false, 'panorama');
+
+      displayed = (await load(image.toDataURL())).skybox!;
+      let disposed = false;
+      displayed.addEventListener('dispose', () => {
+        disposed = true;
+      });
+      image.getContext('2d')!.fillRect(0, 0, 1, 1);
+      await load(image.toDataURL());
+      textureUtils.releaseRetiredSkyboxes();
+      expect(disposed).to.equal(false);
+      displayed = null;
+      textureUtils.releaseRetiredSkyboxes();
+      expect(disposed).to.equal(true);
     });
 
     test('throws if given an invalid url', async () => {

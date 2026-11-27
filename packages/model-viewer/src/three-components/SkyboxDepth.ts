@@ -1,10 +1,14 @@
-import {ClampToEdgeWrapping, DataTexture, NearestFilter, RedFormat, RepeatWrapping, RGFormat, UnsignedByteType} from 'three';
+import {ClampToEdgeWrapping, DataTexture, NearestFilter, RedFormat, RepeatWrapping, RGFormat, Texture, UnsignedByteType} from 'three';
 
 export interface SkyboxDepthImage {
   width: number;
   height: number;
   bitDepth: 8|16;
   samples: Uint8Array;
+}
+
+export function skyboxSourceFlipY(texture: Texture): boolean {
+  return texture.flipY || texture.userData.skyboxSourceFlipY === true;
 }
 
 export function depthTexture(image: SkyboxDepthImage): DataTexture {

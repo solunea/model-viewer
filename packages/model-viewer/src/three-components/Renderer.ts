@@ -180,9 +180,7 @@ export class Renderer extends
     }
 
     this.arRenderer = this.canRender ? new ARRenderer(this) : null as any;
-    this.textureUtils = this.canRender ?
-        new TextureUtils(this.threeRenderer, () => this.gpuUnavailable ? null : this.gpuProbe) :
-        null;
+    this.textureUtils = this.createTextureUtils();
     if (this.canRender) {
       CachingGLTFLoader.initializeKTX2Loader(this.threeRenderer);
     }
@@ -215,6 +213,7 @@ export class Renderer extends
 
   unregisterScene(scene: ModelScene) {
     this.scenes.delete(scene);
+    this.textureUtils?.releaseRetiredSkyboxes();
     this.failedGPUScenes.delete(scene);
     this.disposeViewHelper(scene);
     if (this.skyboxDof != null) {
@@ -801,6 +800,17 @@ export class Renderer extends
     if (this.skyboxDof != null || this.gpu?.hasSkyboxDof === true) {
       this.releaseUnusedSkyboxDof();
     }
+    this.textureUtils?.releaseRetiredSkyboxes();
+  }
+
+  private createTextureUtils(): TextureUtils|null {
+    return this.canRender ?
+        new TextureUtils(
+            this.threeRenderer,
+            () => this.gpuUnavailable ? null : this.gpuProbe,
+            (texture) => Array.from(this.scenes).some(
+                (scene) => scene.isUsingSkyboxTexture(texture))) :
+        null;
   }
 
   private releaseUnusedSkyboxDof() {
@@ -854,9 +864,7 @@ export class Renderer extends
     this.skyboxDof?.dispose();
     this.skyboxDof = null;
     this.textureUtils?.dispose();
-    this.textureUtils = this.canRender ?
-        new TextureUtils(this.threeRenderer, () => this.gpuUnavailable ? null : this.gpuProbe) :
-        null;
+    this.textureUtils = this.createTextureUtils();
     for (const scene of this.scenes) {
       (scene.element as any)[$updateEnvironment]();
     }
