@@ -26,6 +26,7 @@ import {CachingGLTFLoader} from './CachingGLTFLoader.js';
 import {ModelViewerGLTFInstance} from './gltf-instance/ModelViewerGLTFInstance.js';
 import {ModelScene} from './ModelScene.js';
 import {SkyboxDof, supportsSkyboxDof} from './SkyboxDof.js';
+import {SkyboxPanorama} from './SkyboxPanorama.js';
 import TextureUtils from './TextureUtils.js';
 import {ModelViewerViewHelper, ViewHelperOrbit} from './ViewHelper.js';
 import type {WebGPUContext} from './WebGPU.js';
@@ -118,6 +119,7 @@ export class Renderer extends
       (HIGH_FRAME_DURATION_MS + LOW_FRAME_DURATION_MS) / 2;
   private viewHelpers = new Map<ModelScene, ModelViewerViewHelper>();
   private skyboxDof: SkyboxDof|null = null;
+  private skyboxPanorama: SkyboxPanorama|null = null;
   private gpu: WebGPUContext|null = null;
   private gpuProbe: Promise<WebGPUContext|null>|null = null;
   private gpuPending = false;
@@ -779,7 +781,9 @@ export class Renderer extends
           const effect = this.skyboxDof ??= new SkyboxDof();
           effect.reportFrame(t, delta);
           effect.render(this.threeRenderer, scene, dof, width, height);
-        } else {
+        } else if (!element.skyboxOnly ||
+                   !(this.skyboxPanorama ??= new SkyboxPanorama())
+                        .render(this.threeRenderer, scene)) {
           this.threeRenderer.render(scene, scene.camera);
         }
       }
@@ -830,6 +834,8 @@ export class Renderer extends
     this.gpu = null;
     this.skyboxDof?.dispose();
     this.skyboxDof = null;
+    this.skyboxPanorama?.dispose();
+    this.skyboxPanorama = null;
     if (this.textureUtils != null) {
       this.textureUtils.dispose();
     }

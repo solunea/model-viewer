@@ -1,6 +1,6 @@
 /// <reference types="@webgpu/types" />
 import * as three from 'three';
-import { Object3D, Material as Material$4, Texture as Texture$4, Group, Vector3 as Vector3$1, Mesh as Mesh$1, OrthographicCamera as OrthographicCamera$1, DirectionalLight, WebGLRenderer, Scene as Scene$1, DataTexture, Color, Vector2, Vector4, AnimationActionLoopStyles, PerspectiveCamera as PerspectiveCamera$1, Camera as Camera$2, Box3, Sphere, ToneMapping, AnimationMixerEventMap, Intersection, XRTargetRaySpace, Matrix4 as Matrix4$1, EventDispatcher, Event as Event$1, MeshPhysicalMaterial } from 'three';
+import { Object3D, Material as Material$4, Texture as Texture$4, Group, Vector3 as Vector3$1, Mesh as Mesh$1, OrthographicCamera as OrthographicCamera$1, DirectionalLight, WebGLRenderer, Scene as Scene$1, DataTexture, Color, Vector2, Vector4, AnimationActionLoopStyles, PerspectiveCamera as PerspectiveCamera$1, Camera as Camera$2, Box3, Sphere, ToneMapping, SphereGeometry, MeshBasicMaterial, AnimationMixerEventMap, Intersection, XRTargetRaySpace, Matrix4 as Matrix4$1, EventDispatcher, Event as Event$1, MeshPhysicalMaterial } from 'three';
 export { CanvasTexture, FileLoader, Loader, NearestFilter } from 'three';
 import * as three_examples_jsm_loaders_GLTFLoader_js from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTF as GLTF$2, GLTFReference, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -1198,6 +1198,7 @@ declare class ModelScene extends Scene$1 {
         height: number;
     };
     get skyboxTransitionActive(): boolean;
+    get skyboxTransitionMesh(): Mesh$1<SphereGeometry, MeshBasicMaterial> | null;
     isUsingSkyboxTexture(texture: Texture$4): boolean;
     setEnvironmentAndSkybox(environment: Texture$4 | null, skybox: Texture$4 | null): void;
     private disposeReplacedTransientTextures;
@@ -1798,6 +1799,7 @@ declare class Renderer extends EventDispatcher<{
     private avgFrameDuration;
     private viewHelpers;
     private skyboxDof;
+    private skyboxPanorama;
     private gpu;
     private gpuProbe;
     private gpuPending;

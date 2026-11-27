@@ -864,7 +864,11 @@ export class ModelScene extends Scene {
   }
 
   get skyboxTransitionActive(): boolean {
-    return this.skyboxTransition?.parent != null;
+    return this.skyboxTransitionMesh != null;
+  }
+
+  get skyboxTransitionMesh(): Mesh<SphereGeometry, MeshBasicMaterial>|null {
+    return this.skyboxTransition?.parent != null ? this.skyboxTransition : null;
   }
 
   isUsingSkyboxTexture(texture: Texture): boolean {

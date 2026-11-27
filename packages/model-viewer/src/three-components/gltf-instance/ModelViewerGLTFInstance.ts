@@ -43,6 +43,8 @@ export class ModelViewerGLTFInstance extends GLTFInstance {
     }
 
     const {scene} = prepared;
+    const isSkyboxHotspotSphere =
+        prepared.asset.generator === 'Thaleia skybox hotspot sphere';
 
     const nullSphere = new Sphere(undefined, Infinity);
 
@@ -75,6 +77,12 @@ export class ModelViewerGLTFInstance extends GLTFInstance {
         }
 
         const material = mesh.material as MeshStandardMaterial;
+        if (isSkyboxHotspotSphere && material.transparent &&
+            material.opacity === 0) {
+          // Keep the mesh available to raycasting and surface hotspots.
+          material.visible = false;
+          mesh.castShadow = false;
+        }
         if ((material as any).isMeshBasicMaterial === true) {
           material.toneMapped = false;
         }
