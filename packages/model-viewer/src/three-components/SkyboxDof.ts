@@ -288,6 +288,9 @@ export function rings(
 interface SkyboxDofTargets {
   projection: WebGLRenderTarget;
   blur: WebGLRenderTarget;
+  inputs: number[]|null;
+  cameraToSkybox: Matrix4;
+  projectionInverse: Matrix4;
 }
 
 export function supportsSkyboxDof(renderer: WebGLRenderer, skybox: Texture) {
@@ -398,9 +401,16 @@ export class SkyboxDof {
       packedRadius.minFilter = packedRadius.magFilter = NearestFilter;
       targets = {
         projection,
-        blur: new WebGLRenderTarget(width, height, options)
+        blur: new WebGLRenderTarget(width, height, options),
+        inputs: null,
+        cameraToSkybox: new Matrix4(),
+        projectionInverse: new Matrix4()
       };
       this.targets.set(hdr, targets);
+    }
+    if (targets.projection.width !== width ||
+        targets.projection.height !== height) {
+      targets.inputs = null;
     }
     targets.projection.setSize(width, height);
     targets.blur.setSize(width, height);
@@ -472,19 +482,19 @@ export class SkyboxDof {
     this.common.strength.value = frame.strength;
     this.common.maxBlur.value = frame.maxBlur;
 
-    this.projection.uniforms.texelSize.value.set(1 / workWidth, 1 / workHeight);
-    this.blur.uniforms.projectedColor.value = targets.projection.textures[0];
-    this.blur.uniforms.projectedRadius.value = targets.projection.textures[1];
-    this.blur.uniforms.radiusScale.value.set(1 / paddedWidth, 1 / paddedHeight);
-    const wide = frame.maxBlur > 16;
-    this.blur.uniforms.samples.value = divisor === 3 ? this.reducedKernel :
-        wide                                         ? this.wideKernel :
-                                                       this.fullKernel;
-    this.blur.uniforms.tapCount.value = divisor === 3 ? 8 : wide ? 24 : 16;
-    this.blur.uniforms.maximumNear.value =
-        Math.min(1, frame.focus * frame.strength) * frame.maxBlur;
-    this.blur.uniforms.maximumFar.value =
-        Math.min(1, (1 - frame.focus) * frame.strength) * frame.maxBlur;
+    // Hotspot masks, exposure and fade opacity affect only the composite.
+    const inputs = [
+      scene.id, cssWidth, cssHeight, workWidth, workHeight, divisor,
+      frame.skybox.id, frame.skybox.version, frame.skybox.source.version,
+      frame.depth.id, frame.depth.version, frame.depth.source.version,
+      this.common.flipDepthY.value, frame.bitDepth, +frame.invert,
+      frame.focus, frame.strength, frame.maxBlur,
+    ];
+    const previous = targets.inputs;
+    const reuseBlur = previous != null &&
+        inputs.every((value, index) => value === previous[index]) &&
+        targets.cameraToSkybox.equals(this.common.cameraToSkybox.value) &&
+        targets.projectionInverse.equals(this.common.projectionInverse.value);
 
     this.composite.uniforms.nearLayer.value = targets.blur.textures[0];
     this.composite.uniforms.farLayer.value = targets.blur.textures[1];
@@ -509,16 +519,35 @@ export class SkyboxDof {
     const background = scene.background;
     const hidden = frame.hideDuringRender;
     const wasVisible = hidden?.visible;
-    renderer.autoClear = false;
     try {
-      this.passMesh.material = this.projection;
-      renderer.setRenderTarget(targets.projection);
-      renderer.render(this.passes, this.camera);
+      if (!reuseBlur) {
+        targets.inputs = null;
+        this.projection.uniforms.texelSize.value.set(1 / workWidth, 1 / workHeight);
+        this.blur.uniforms.projectedColor.value = targets.projection.textures[0];
+        this.blur.uniforms.projectedRadius.value = targets.projection.textures[1];
+        this.blur.uniforms.radiusScale.value.set(1 / paddedWidth, 1 / paddedHeight);
+        const wide = frame.maxBlur > 16;
+        this.blur.uniforms.samples.value = divisor === 3 ? this.reducedKernel :
+            wide ? this.wideKernel : this.fullKernel;
+        this.blur.uniforms.tapCount.value = divisor === 3 ? 8 : wide ? 24 : 16;
+        this.blur.uniforms.maximumNear.value =
+            Math.min(1, frame.focus * frame.strength) * frame.maxBlur;
+        this.blur.uniforms.maximumFar.value =
+            Math.min(1, (1 - frame.focus) * frame.strength) * frame.maxBlur;
 
-      this.passMesh.material = this.blur;
-      renderer.setRenderTarget(targets.blur);
-      renderer.render(this.passes, this.camera);
+        renderer.autoClear = false;
+        this.passMesh.material = this.projection;
+        renderer.setRenderTarget(targets.projection);
+        renderer.render(this.passes, this.camera);
 
+        this.passMesh.material = this.blur;
+        renderer.setRenderTarget(targets.blur);
+        renderer.render(this.passes, this.camera);
+
+        targets.cameraToSkybox.copy(this.common.cameraToSkybox.value);
+        targets.projectionInverse.copy(this.common.projectionInverse.value);
+        targets.inputs = inputs;
+      }
       renderer.setRenderTarget(null);
       renderer.autoClear = true;
       scene.background = null;

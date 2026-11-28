@@ -904,6 +904,7 @@ interface WebGPUShadowMaterials {
  */
 declare class Shadow extends Object3D {
     private lastRenderer;
+    private lastRenderTime;
     private mode;
     private floor;
     private intensity;
@@ -920,6 +921,7 @@ declare class Shadow extends Object3D {
     private thetaDamper;
     private phiDamper;
     needsUpdate: boolean;
+    animationNeedsUpdate: boolean;
     private basicCamera;
     private renderTarget;
     private renderTargetBlur;
@@ -944,7 +946,7 @@ declare class Shadow extends Object3D {
     getIntensity(): number;
     setOffset(offset: number): void;
     gap(): number;
-    render(renderer: WebGLRenderer | WebGPURenderer, scene: Scene$1, gpu?: WebGPUShadowMaterials): void;
+    render(renderer: WebGLRenderer | WebGPURenderer, scene: Scene$1, gpu?: WebGPUShadowMaterials, frameTime?: number): void;
     invalidateCastShadow(): void;
     dispose(): void;
     withWebGPUShadow(materials: WebGPUShadowMaterials, render: () => void): void;
@@ -1307,7 +1309,7 @@ declare class ModelScene extends Scene$1 {
      * shape has changed (not a rotation about the Y axis).
      */
     updateShadow(): void;
-    renderShadow(renderer: WebGLRenderer | WebGPURenderer, gpu?: WebGPUShadowMaterials): void;
+    renderShadow(renderer: WebGLRenderer | WebGPURenderer, gpu?: WebGPUShadowMaterials, frameTime?: number): void;
     private queueShadowRender;
     /**
      * Sets the shadow's intensity, lazily creating the shadow as necessary.
@@ -1679,8 +1681,12 @@ declare class WebGPUContext {
     private readonly onLost;
     readonly shadows: WebGPUShadowMaterials;
     private skyboxDof;
+    private panoramaPipeline;
+    private panoramaTransition;
     private readonly pmrem;
     private readonly environments;
+    private readonly canvases;
+    private readonly preparedTextures;
     private readonly device;
     private readonly onGPUError;
     get hasSkyboxDof(): boolean;
@@ -1692,10 +1698,14 @@ declare class WebGPUContext {
      */
     createRenderer(canvas: HTMLCanvasElement, antialias?: boolean): Promise<WebGPURenderer>;
     loadGainMap(url: string, withCredentials: boolean, onProgress: (event: ProgressEvent) => void): Promise<three.DataTexture>;
+    prepareTextures(textures: readonly Texture$4[]): Promise<void>;
     private environment;
     withEnvironment(scene: Scene$1, render: () => void): void;
     withScene(scene: ModelScene, render: () => void): void;
-    render(scene: ModelScene, width: number, height: number): void;
+    displayCanvas(scene: ModelScene): HTMLCanvasElement | null;
+    withCanvas(scene: ModelScene, width: number, height: number, render: () => void): void;
+    releaseCanvas(scene: ModelScene): void;
+    render(scene: ModelScene, width: number, height: number): boolean;
     releaseSkyboxDof(): void;
     dispose(): void;
 }
@@ -1716,6 +1726,7 @@ declare class TextureUtils {
     private generatedEnvironmentMap;
     private generatedEnvironmentMapAlt;
     private skyboxCache;
+    private skyboxCacheBytes;
     private retiredSkyboxes;
     private disposed;
     private blurMaterial;
@@ -1736,7 +1747,7 @@ declare class TextureUtils {
      * accordingly. `skybox` is a WebGLRenderCubeTarget, and `environmentMap`
      * is a Texture from a WebGLRenderCubeTarget.
      */
-    generateEnvironmentMapAndSkybox(skyboxUrl?: string | null, environmentMapUrl?: string | null, progressCallback?: (progress: number) => void, withCredentials?: boolean, skyboxCacheKey?: string | null, skyboxMaxWidth?: number | null): Promise<EnvironmentMapAndSkybox>;
+    generateEnvironmentMapAndSkybox(skyboxUrl?: string | null, environmentMapUrl?: string | null, progressCallback?: (progress: number) => void, withCredentials?: boolean, skyboxCacheKey?: string | null, skyboxMaxWidth?: number | null, prepare?: (textures: readonly Texture$4[]) => Promise<void>): Promise<EnvironmentMapAndSkybox>;
     /**
      * Loads an equirect Texture from a given URL, for use as a skybox.
      */
@@ -1774,15 +1785,8 @@ interface ContextLostEvent extends Event$1 {
     sourceEvent: WebGLContextEvent;
 }
 /**
- * Registers canvases with Canvas2DRenderingContexts and renders them
- * all in the same WebGLRenderingContext, spitting out textures to apply
- * to the canvases. Creates a fullscreen WebGL canvas that is not added
- * to the DOM, and on each frame, renders each registered canvas on a portion
- * of the WebGL canvas, and applies the texture on the registered canvas.
- *
- * In the future, can use ImageBitmapRenderingContext instead of
- * Canvas2DRenderingContext if supported for cheaper transferring of
- * the texture.
+ * Shares a renderer across the registered scenes. WebGL multiplexes a shared
+ * canvas, and WebGPU draws directly to each scene's canvas target.
  */
 declare class Renderer extends EventDispatcher<{
     contextlost: {
@@ -1802,10 +1806,14 @@ declare class Renderer extends EventDispatcher<{
     height: number;
     dpr: number;
     private scenes;
-    private multipleScenesVisible;
+    private multipleWebGLScenesVisible;
     private lastTick;
     private renderedLastFrame;
+    private renderedWebGPULastFrame;
     private scaleStep;
+    private webGPUScaleStep;
+    private slowWebGPUFrames;
+    private fastWebGPUFrames;
     private lastStep;
     private avgFrameDuration;
     private viewHelpers;
@@ -1826,7 +1834,13 @@ declare class Renderer extends EventDispatcher<{
     registerScene(scene: ModelScene): void;
     unregisterScene(scene: ModelScene): void;
     displayCanvas(scene: ModelScene): HTMLCanvasElement;
+    captureSize(scene: ModelScene): {
+        width: number;
+        height: number;
+    };
+    captureCanvas(scene: ModelScene): HTMLCanvasElement;
     private wantsWebGPU;
+    prepareSkybox(scene: ModelScene, textures: readonly Texture$4[], backend?: RenderBackendPreference): Promise<void>;
     updateBackend(scene: ModelScene): void;
     private probeWebGPU;
     prepareExternalRenderer(scene: ModelScene, external: RendererInterface): Promise<void>;
@@ -1834,19 +1848,17 @@ declare class Renderer extends EventDispatcher<{
     private fallbackScene;
     private handleDeviceLoss;
     webGPUForXR(scene: ModelScene, environmentEstimation: boolean): WebGPUContext | null;
-    /**
-     * The function enables an optimization, where when there is only a single
-     * <model-viewer> element, we can use the renderer's 3D canvas directly for
-     * display. Otherwise we need to use the element's 2D canvas and copy the
-     * renderer's result into it.
-     */
-    private countVisibleScenes;
+    private hasNativeWebGPUCanvas;
+    private snapshotWebGLCanvas;
+    /** A single visible WebGL scene can present the shared canvas directly. */
+    private updateWebGLPresentation;
     /**
      * Updates the renderer's size based on the largest scene and any changes to
      * device pixel ratio.
      */
     private updateRendererSize;
     private updateRendererScale;
+    private updateWebGPUScale;
     private shouldRender;
     private rescaleCanvas;
     private sceneSize;
@@ -1867,6 +1879,8 @@ declare class Renderer extends EventDispatcher<{
      * the time that has passed since the last rendered frame.
      */
     preRender(scene: ModelScene, t: number, delta: number, renderer?: WebGLRenderer | WebGPURenderer): void;
+    private updateExposure;
+    private renderWebGPU;
     render(t: number, frame?: XRFrame, forceScene?: ModelScene): void;
     private createTextureUtils;
     private releaseUnusedSkyboxDof;
@@ -2637,6 +2651,7 @@ declare interface ControlsInterface {
 interface SkyboxPreloadOptions {
     cacheKey?: string | null;
     maxWidth?: number | null;
+    renderBackend?: RenderBackendPreference;
 }
 declare interface EnvironmentInterface {
     environmentImage: string | null;

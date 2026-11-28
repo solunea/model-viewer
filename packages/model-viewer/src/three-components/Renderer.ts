@@ -14,11 +14,13 @@
  */
 
 import {Event, EventDispatcher, NeutralToneMapping, Vector2, WebGLRenderer} from 'three';
+import type {Texture} from 'three';
 import type {WebGPURenderer} from 'three/webgpu';
 
 import {$updateEnvironment} from '../features/environment.js';
 import {ModelViewerGlobalConfig} from '../features/loading.js';
 import ModelViewerElementBase, {$canvas, $setRenderBackend, $tick, $updateSize, EffectComposerInterface, RendererInterface} from '../model-viewer-base.js';
+import type {RenderBackendPreference} from '../model-viewer-base.js';
 import {clamp, isDebugMode} from '../utilities.js';
 
 import {ARRenderer} from './ARRenderer.js';
@@ -48,20 +50,18 @@ const HIGH_FRAME_DURATION_MS = 60;
 const MAX_AVG_CHANGE_MS = 5;
 const SCALE_STEPS = [1, 0.79, 0.62, 0.5, 0.4, 0.31, 0.25];
 const DEFAULT_LAST_STEP = 3;
+// Allow for jitter around the 16.7 ms refresh interval on 60 Hz displays.
+const WEBGPU_SLOW_FRAME_MS = 18;
+const WEBGPU_FAST_FRAME_MS = 17;
+const WEBGPU_DOWNSCALE_FRAMES = 3;
+const WEBGPU_UPSCALE_FRAMES = 60;
 
 export const DEFAULT_POWER_PREFERENCE: string = 'high-performance';
 const COMMERCE_EXPOSURE = 1.3;
 
 /**
- * Registers canvases with Canvas2DRenderingContexts and renders them
- * all in the same WebGLRenderingContext, spitting out textures to apply
- * to the canvases. Creates a fullscreen WebGL canvas that is not added
- * to the DOM, and on each frame, renders each registered canvas on a portion
- * of the WebGL canvas, and applies the texture on the registered canvas.
- *
- * In the future, can use ImageBitmapRenderingContext instead of
- * Canvas2DRenderingContext if supported for cheaper transferring of
- * the texture.
+ * Shares a renderer across the registered scenes. WebGL multiplexes a shared
+ * canvas, and WebGPU draws directly to each scene's canvas target.
  */
 export class Renderer extends
     EventDispatcher<{contextlost: {sourceEvent: WebGLContextEvent}}> {
@@ -110,10 +110,14 @@ export class Renderer extends
   public dpr = 1;
 
   private scenes: Set<ModelScene> = new Set();
-  private multipleScenesVisible = false;
+  private multipleWebGLScenesVisible = false;
   private lastTick = performance.now();
   private renderedLastFrame = false;
+  private renderedWebGPULastFrame = false;
   private scaleStep = 0;
+  private webGPUScaleStep = 0;
+  private slowWebGPUFrames = 0;
+  private fastWebGPUFrames = 0;
   private lastStep = DEFAULT_LAST_STEP;
   private avgFrameDuration =
       (HIGH_FRAME_DURATION_MS + LOW_FRAME_DURATION_MS) / 2;
@@ -215,6 +219,7 @@ export class Renderer extends
 
   unregisterScene(scene: ModelScene) {
     this.scenes.delete(scene);
+    this.gpu?.releaseCanvas(scene);
     this.textureUtils?.releaseRetiredSkyboxes();
     this.failedGPUScenes.delete(scene);
     this.disposeViewHelper(scene);
@@ -234,15 +239,38 @@ export class Renderer extends
   displayCanvas(scene: ModelScene): HTMLCanvasElement {
     const externalCanvas = scene.externalRenderer?.captureCanvas?.();
     if (externalCanvas != null) return externalCanvas;
-    if (scene.element.activeRenderBackend === 'webgpu') return scene.canvas;
-    return scene.element.modelIsVisible && !this.multipleScenesVisible ?
-        this.canvas3D :
-        scene.element[$canvas];
+    if (scene.element.activeRenderBackend === 'webgpu') {
+      return this.gpu?.displayCanvas(scene) ?? scene.canvas;
+    }
+    return this.canvas3D.parentElement != null &&
+            this.canvas3D.parentElement === scene.canvas.parentElement ?
+        this.canvas3D : scene.element[$canvas];
   }
 
-  private wantsWebGPU(scene: ModelScene): boolean {
-    const {effectRenderer, externalRenderer, element} = scene;
-    const {renderBackend} = element;
+  captureSize(scene: ModelScene) {
+    const canvas = this.gpu?.displayCanvas(scene);
+    if (canvas != null) return {width: canvas.width, height: canvas.height};
+    const captureDpr = this.dpr * this.scaleFactor;
+    return {width: scene.width * captureDpr, height: scene.height * captureDpr};
+  }
+
+  captureCanvas(scene: ModelScene): HTMLCanvasElement {
+    const canvas = this.displayCanvas(scene);
+    const context = this.gpu;
+    if (context != null && canvas === context.displayCanvas(scene) &&
+        context.renderer.domElement === context.canvas && !this.isPresenting) {
+      // Some browsers expose a fresh drawing buffer after presenting a WebGPU
+      // canvas. Draw the current pose in this task before reading its pixels.
+      this.updateExposure(scene, context.renderer);
+      scene.renderShadow(context.renderer, context.shadows);
+      this.renderWebGPU(scene, context, canvas.width, canvas.height, 0);
+    }
+    return canvas;
+  }
+
+  private wantsWebGPU(
+      scene: ModelScene, renderBackend = scene.element.renderBackend): boolean {
+    const {effectRenderer, externalRenderer} = scene;
     return (renderBackend === 'webgpu' || renderBackend === 'auto') &&
         !this.gpuUnavailable && !this.failedGPUScenes.has(scene) &&
         (externalRenderer == null || externalRenderer.prepareRenderBackend != null) &&
@@ -250,6 +278,23 @@ export class Renderer extends
          (effectRenderer.prepareWebGPU != null &&
           effectRenderer.renderWebGPU != null &&
           effectRenderer.supportsWebGPU?.() !== false));
+  }
+
+  async prepareSkybox(
+      scene: ModelScene, textures: readonly Texture[],
+      backend?: RenderBackendPreference): Promise<void> {
+    if (this.disposed || !this.canRender) return;
+    const wantsGPU = () =>
+        scene.externalRenderer == null && this.wantsWebGPU(scene, backend);
+    const context = wantsGPU() ? await this.probeWebGPU() : null;
+    if (this.disposed) return;
+    if (context != null && context === this.gpu && wantsGPU()) {
+      await context.prepareTextures(textures);
+      return;
+    }
+    for (const texture of textures) {
+      if (!texture.isRenderTargetTexture) this.threeRenderer.initTexture(texture);
+    }
   }
 
   updateBackend(scene: ModelScene) {
@@ -333,6 +378,7 @@ export class Renderer extends
   }
 
   private fallbackScene(scene: ModelScene, error: unknown) {
+    this.gpu?.releaseCanvas(scene);
     this.failedGPUScenes.add(scene);
     scene.queueRender();
     console.warn('<model-viewer> Using WebGL for this scene.', error);
@@ -359,38 +405,45 @@ export class Renderer extends
     return this.gpu;
   }
 
-  /**
-   * The function enables an optimization, where when there is only a single
-   * <model-viewer> element, we can use the renderer's 3D canvas directly for
-   * display. Otherwise we need to use the element's 2D canvas and copy the
-   * renderer's result into it.
-   */
-  private countVisibleScenes() {
+  private hasNativeWebGPUCanvas(scene: ModelScene): boolean {
+    const parent = scene.canvas.parentElement;
+    return parent != null && scene.element.activeRenderBackend === 'webgpu' &&
+        this.gpu?.displayCanvas(scene)?.parentElement === parent &&
+        this.wantsWebGPU(scene) &&
+        scene.width > 0 && scene.height > 0 &&
+        this.canvas3D.width > 0 && this.canvas3D.height > 0;
+  }
+
+  private snapshotWebGLCanvas(scene: ModelScene) {
+    const {width, height} = this.sceneSize(scene);
+    this.copyPixels(scene, width, height);
+    this.canvas3D.remove();
+  }
+
+  /** A single visible WebGL scene can present the shared canvas directly. */
+  private updateWebGLPresentation() {
     const {canvas3D} = this;
     let visibleScenes = 0;
-    let canvas3DScene = null;
+    let visibleWebGLScene: ModelScene|null = null;
+    let canvasOwner: ModelScene|null = null;
+    const owner = canvas3D.parentElement;
     for (const scene of this.scenes) {
       const {element} = scene;
-      if (element.modelIsVisible && scene.externalRenderer == null) {
+      if (element.modelIsVisible && scene.externalRenderer == null &&
+          !this.hasNativeWebGPUCanvas(scene)) {
         ++visibleScenes;
+        visibleWebGLScene = scene;
       }
-      if (canvas3D.parentElement === scene.canvas.parentElement) {
-        canvas3DScene = scene;
-      }
-    }
-    const multipleScenesVisible = visibleScenes > 1;
-
-    if (canvas3DScene != null) {
-      const newlyMultiple =
-          multipleScenesVisible && !this.multipleScenesVisible;
-      const disappearing = !canvas3DScene.element.modelIsVisible;
-      if (newlyMultiple || disappearing) {
-        const {width, height} = this.sceneSize(canvas3DScene);
-        this.copyPixels(canvas3DScene, width, height);
-        canvas3D.parentElement!.removeChild(canvas3D);
+      if (owner != null && owner === scene.canvas.parentElement) {
+        canvasOwner = scene;
       }
     }
-    this.multipleScenesVisible = multipleScenesVisible;
+    const directScene = visibleScenes === 1 ? visibleWebGLScene : null;
+    if (canvasOwner != null && canvasOwner !== directScene) {
+      this.snapshotWebGLCanvas(canvasOwner);
+    }
+    if (directScene != null && directScene !== canvasOwner) directScene.queueRender();
+    this.multipleWebGLScenesVisible = visibleScenes > 1;
   }
 
   /**
@@ -465,7 +518,25 @@ export class Renderer extends
     }
   }
 
-  private shouldRender(scene: ModelScene): boolean {
+  private updateWebGPUScale(delta: number) {
+    const sampled = this.renderedWebGPULastFrame && delta > 0 && delta <= 200;
+    this.slowWebGPUFrames =
+        sampled && delta > WEBGPU_SLOW_FRAME_MS ? this.slowWebGPUFrames + 1 : 0;
+    this.fastWebGPUFrames =
+        sampled && delta <= WEBGPU_FAST_FRAME_MS ? this.fastWebGPUFrames + 1 : 0;
+
+    if (this.slowWebGPUFrames >= WEBGPU_DOWNSCALE_FRAMES) {
+      ++this.webGPUScaleStep;
+      this.slowWebGPUFrames = 0;
+    } else if (this.fastWebGPUFrames >= WEBGPU_UPSCALE_FRAMES) {
+      --this.webGPUScaleStep;
+      this.fastWebGPUFrames = 0;
+    }
+    this.webGPUScaleStep = clamp(this.webGPUScaleStep, 0, this.lastStep);
+    this.renderedWebGPULastFrame = false;
+  }
+
+  private shouldRender(scene: ModelScene, scaleStep: number): boolean {
     if (!scene.shouldRender()) {
       // The first frame we stop rendering the scene (because it stops moving),
       // trigger one extra render at full scale.
@@ -475,9 +546,9 @@ export class Renderer extends
       } else {
         return false;
       }
-    } else if (scene.scaleStep != this.scaleStep) {
+    } else if (scene.scaleStep != scaleStep) {
       // Update render scale
-      scene.scaleStep = this.scaleStep;
+      scene.scaleStep = scaleStep;
       this.rescaleCanvas(scene);
     }
     return true;
@@ -491,8 +562,11 @@ export class Renderer extends
     const {style} = scene.canvas;
     style.width = `${width}px`;
     style.height = `${height}px`;
-    this.canvas3D.style.width = `${width}px`;
-    this.canvas3D.style.height = `${height}px`;
+    if (this.canvas3D.parentElement != null &&
+        this.canvas3D.parentElement === scene.canvas.parentElement) {
+      this.canvas3D.style.width = style.width;
+      this.canvas3D.style.height = style.height;
+    }
 
     const renderedDpr = this.dpr * scale;
     const reason = scale < 1                 ? 'GPU throttling' :
@@ -512,7 +586,7 @@ export class Renderer extends
 
   private sceneSize(scene: ModelScene) {
     const {dpr} = this;
-    const scaleFactor = SCALE_STEPS[scene.scaleStep];
+    const scaleFactor = SCALE_STEPS[scene.scaleStep] ?? SCALE_STEPS[this.scaleStep];
     // We avoid using the Three.js PixelRatio and handle it ourselves here so
     // that we can do proper rounding and avoid white boundary pixels.
     const width = Math.min(
@@ -550,9 +624,9 @@ export class Renderer extends
       y,
       width,
       height,
-      canvasWidth: this.canvas3D.width,
-      canvasHeight: this.canvas3D.height,
-      renderedDpr: this.dpr * SCALE_STEPS[scene.scaleStep]
+      canvasWidth: renderer.domElement.width,
+      canvasHeight: renderer.domElement.height,
+      renderedDpr: this.dpr * (SCALE_STEPS[scene.scaleStep] ?? 1)
     });
   }
 
@@ -576,8 +650,7 @@ export class Renderer extends
         null;
   }
 
-  private copyPixels(
-      scene: ModelScene, width: number, height: number, canvas = this.canvas3D) {
+  private copyPixels(scene: ModelScene, width: number, height: number) {
     const context2D = scene.context;
     if (context2D == null) {
       console.log('could not acquire 2d context');
@@ -585,7 +658,7 @@ export class Renderer extends
     }
     context2D.clearRect(0, 0, width, height);
     context2D.drawImage(
-        canvas, 0, 0, width, height, 0, 0, width, height);
+        this.canvas3D, 0, 0, width, height, 0, 0, width, height);
     scene.canvas.classList.add('show');
   }
 
@@ -617,10 +690,13 @@ export class Renderer extends
   preRender(
       scene: ModelScene, t: number, delta: number,
       renderer: WebGLRenderer|WebGPURenderer = this.threeRenderer) {
+    scene.element[$tick](t, delta);
+    this.updateExposure(scene, renderer);
+  }
+
+  private updateExposure(
+      scene: ModelScene, renderer: WebGLRenderer|WebGPURenderer) {
     const {element, exposure, toneMapping} = scene;
-
-    element[$tick](t, delta);
-
     const exposureIsNumber =
         typeof exposure === 'number' && !Number.isNaN(exposure);
     const env = element.environmentImage;
@@ -630,6 +706,30 @@ export class Renderer extends
     renderer.toneMappingExposure =
         (exposureIsNumber ? exposure : 1.0) *
         (compensateExposure ? COMMERCE_EXPOSURE : 1.0);
+  }
+
+  private renderWebGPU(
+      scene: ModelScene, context: WebGPUContext, width: number, height: number,
+      delta: number) {
+    const {renderer} = context;
+    const {effectRenderer} = scene;
+    let panoramaMoved = false;
+    context.withCanvas(scene, width, height, () => {
+      renderer.setRenderTarget(null);
+      renderer.setViewport(0, 0, width, height);
+      renderer.autoClear = true;
+      renderer.toneMapping = scene.toneMapping;
+      context.withScene(scene, () => {
+        if (effectRenderer?.renderWebGPU != null &&
+            this.gpuEffects.get(effectRenderer) === true) {
+          effectRenderer.renderWebGPU(delta);
+        } else {
+          panoramaMoved = context.render(scene, width, height);
+        }
+      });
+      this.renderViewHelper(scene, 0, 0, width, height, renderer);
+    });
+    return panoramaMoved;
   }
 
   render(t: number, frame?: XRFrame, forceScene?: ModelScene) {
@@ -647,12 +747,13 @@ export class Renderer extends
       return;
     }
 
-    this.countVisibleScenes();
+    this.updateWebGLPresentation();
     this.updateRendererSize();
     if (this.renderedLastFrame) {
       this.updateRendererScale(delta);
       this.renderedLastFrame = false;
     }
+    if (this.gpu != null) this.updateWebGPUScale(delta);
 
     const {canvas3D} = this;
 
@@ -694,7 +795,9 @@ export class Renderer extends
       this.preRender(scene, t, delta, context?.renderer);
       scene.updateSkyboxDof(delta);
 
-      if (!this.shouldRender(scene)) {
+      const nativeWebGPU = context != null && externalRenderer == null;
+      if (!this.shouldRender(
+              scene, nativeWebGPU ? this.webGPUScaleStep : this.scaleStep)) {
         continue;
       }
 
@@ -713,6 +816,7 @@ export class Renderer extends
             viewMatrix: viewMatrix,
             projectionMatrix: projectionMatrix.elements
           });
+          this.gpu?.releaseCanvas(scene);
           element[$setRenderBackend](context != null ? 'webgpu' : 'webgl');
         } catch (error) {
           if (context == null) throw error;
@@ -721,49 +825,49 @@ export class Renderer extends
         continue;
       }
 
-      if (!element.modelIsVisible && !this.multipleScenesVisible) {
-        // Here we are pre-rendering on the visible canvas, so we must mark the
-        // visible scene dirty to ensure it overwrites us.
-        for (const visibleScene of this.scenes) {
-          if (visibleScene.element.modelIsVisible) {
-            visibleScene.queueRender();
-          }
-        }
-      }
-
       const {width, height} = this.sceneSize(scene);
-      const viewportY = Math.ceil(this.height * this.dpr) - height;
 
       if (context != null && width > 0 && height > 0) {
         try {
-          const {renderer} = context;
-          scene.renderShadow(renderer, context.shadows);
-          renderer.setRenderTarget(null);
-          renderer.setViewport(0, 0, width, height);
-          renderer.autoClear = true;
-          renderer.toneMapping = scene.toneMapping;
-          context.withScene(scene, () => {
-            if (effectRenderer?.renderWebGPU != null) {
-              effectRenderer.renderWebGPU(delta);
-            } else {
-              context.render(scene, width, height);
-            }
-          });
-          this.renderViewHelper(scene, 0, viewportY, width, height, renderer);
-          this.copyPixels(scene, width, height, context.canvas);
+          scene.renderShadow(context.renderer, context.shadows, t);
+          const panoramaMoved = this.renderWebGPU(scene, context, width, height, delta);
+          scene.canvas.classList.remove('show');
           if (canvas3D.parentElement === scene.canvas.parentElement) {
             canvas3D.remove();
           }
           element[$setRenderBackend]('webgpu');
           scene.hasRendered();
+          if (panoramaMoved) scene.queueRender();
           ++scene.renderCount;
-          this.renderedLastFrame = true;
+          this.renderedWebGPULastFrame ||= element.modelIsVisible;
         } catch (error) {
           this.fallbackScene(scene, error);
         }
         continue;
       }
 
+      const canvasOwner = canvas3D.parentElement;
+      if (canvasOwner != null && canvasOwner !== scene.canvas.parentElement) {
+        // Rendering callbacks can change a later scene's backend during this frame.
+        for (const previous of this.scenes) {
+          if (previous.canvas.parentElement === canvasOwner) {
+            this.snapshotWebGLCanvas(previous);
+            if (element.modelIsVisible) this.multipleWebGLScenesVisible = true;
+            break;
+          }
+        }
+      }
+      if (!element.modelIsVisible && !this.multipleWebGLScenesVisible) {
+        // The shared WebGL canvas needs another draw for the visible scene.
+        for (const visibleScene of this.scenes) {
+          if (visibleScene.element.modelIsVisible &&
+              visibleScene.externalRenderer == null &&
+              !this.hasNativeWebGPUCanvas(visibleScene)) {
+            visibleScene.queueRender();
+          }
+        }
+      }
+      const viewportY = Math.ceil(this.height * this.dpr) - height;
       scene.renderShadow(this.threeRenderer);
 
       // Need to set the render target in order to prevent
@@ -788,14 +892,17 @@ export class Renderer extends
         }
       }
       this.renderViewHelper(scene, 0, viewportY, width, height);
-      if (this.multipleScenesVisible ||
+      if (this.multipleWebGLScenesVisible ||
           (!scene.element.modelIsVisible && (scene.renderCount === 0 || scene === forceScene))) {
         this.copyPixels(scene, width, height);
       } else if (canvas3D.parentElement !== scene.canvas.parentElement) {
+        canvas3D.style.width = scene.canvas.style.width;
+        canvas3D.style.height = scene.canvas.style.height;
         scene.canvas.parentElement!.appendChild(canvas3D);
         scene.canvas.classList.remove('show');
       }
 
+      this.gpu?.releaseCanvas(scene);
       element[$setRenderBackend]('webgl');
       scene.hasRendered();
       ++scene.renderCount;

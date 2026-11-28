@@ -394,6 +394,18 @@ export class PanoramaAreas extends Group {
       return;
     }
     const uniforms = webglMaterial.uniforms;
+    if (uniforms.shineProgress.value >= 1 && this.focused == null) {
+      // The shine shader would discard every fragment. Keep the group active
+      // for hit testing and the next sweep while rendering the background.
+      const visible = mesh.visible;
+      mesh.visible = false;
+      try {
+        render();
+      } finally {
+        mesh.visible = visible;
+      }
+      return;
+    }
     const gpu = this.webgpuMaterial ??= createMaterial(
         texture, this.highlightColor, uniforms.panorama.value,
         uniforms.bounds.value);

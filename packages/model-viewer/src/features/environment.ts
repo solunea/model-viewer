@@ -16,7 +16,7 @@
 import {property} from 'lit/decorators.js';
 import {ACESFilmicToneMapping, AgXToneMapping, CineonToneMapping, LinearToneMapping, NeutralToneMapping, NoToneMapping, ReinhardToneMapping, Texture} from 'three';
 
-import ModelViewerElementBase, {$needsRender, $progressTracker, $renderer, $scene, $shouldAttemptPreload, $updateSource} from '../model-viewer-base.js';
+import ModelViewerElementBase, {$needsRender, $progressTracker, $renderer, $scene, $shouldAttemptPreload, $updateSource, RenderBackendPreference} from '../model-viewer-base.js';
 import {loadSkyboxDepth, SkyboxDepthImage} from '../three-components/SkyboxDepth.js';
 import {clamp, Constructor, deserializeUrl} from '../utilities.js';
 
@@ -46,6 +46,7 @@ interface SkyboxDepthRequest {
 export interface SkyboxPreloadOptions {
   cacheKey?: string|null;
   maxWidth?: number|null;
+  renderBackend?: RenderBackendPreference;
 }
 
 export declare interface EnvironmentInterface {
@@ -321,16 +322,20 @@ export const EnvironmentMixin = <T extends Constructor<ModelViewerElementBase>>(
         environmentImage: string|null = this.environmentImage,
         {
           cacheKey = this.getSkyboxCacheKey(skyboxImage),
-          maxWidth = this.skyboxMaxWidth
+          maxWidth = this.skyboxMaxWidth,
+          renderBackend
         }: SkyboxPreloadOptions = {}): Promise<void> {
-      const {textureUtils} = this[$renderer];
+      const renderer = this[$renderer];
+      const {textureUtils} = renderer;
       if (textureUtils == null) {
         return;
       }
 
       await textureUtils.generateEnvironmentMapAndSkybox(
           deserializeUrl(skyboxImage), environmentImage, () => {},
-          this.withCredentials, cacheKey, maxWidth);
+          this.withCredentials, cacheKey, maxWidth,
+          textures =>
+              renderer.prepareSkybox(this[$scene], textures, renderBackend));
     }
 
     async[$updateEnvironment]() {

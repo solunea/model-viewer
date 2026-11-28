@@ -207,7 +207,7 @@ export default class ModelViewerElementBase extends ReactiveElement {
     reflect: true,
     useDefault: true
   })
-  renderBackend: RenderBackendPreference = 'webgl';
+  renderBackend: RenderBackendPreference = 'auto';
 
   private renderedBackend: RenderBackend|null = null;
 
@@ -552,7 +552,7 @@ export default class ModelViewerElementBase extends ReactiveElement {
   /** @export */
   toDataURL(type?: string, encoderOptions?: number): string {
     return this[$renderer]
-        .displayCanvas(this[$scene])
+        .captureCanvas(this[$scene])
         .toDataURL(type, encoderOptions);
   }
 
@@ -563,9 +563,8 @@ export default class ModelViewerElementBase extends ReactiveElement {
     const useIdealAspect = options ? options.idealAspect : undefined;
 
     const {width, height, idealAspect, aspect} = this[$scene];
-    const {dpr, scaleFactor} = this[$renderer];
-    let outputWidth = width * scaleFactor * dpr;
-    let outputHeight = height * scaleFactor * dpr;
+    let {width: outputWidth, height: outputHeight} =
+        this[$renderer].captureSize(this[$scene]);
     let offsetX = 0;
     let offsetY = 0;
     if (useIdealAspect === true) {
@@ -585,7 +584,7 @@ export default class ModelViewerElementBase extends ReactiveElement {
     try {
       return await new Promise<Blob>((resolve, reject) => {
         blobCanvas.getContext('2d')!.drawImage(
-            this[$renderer].displayCanvas(this[$scene]),
+            this[$renderer].captureCanvas(this[$scene]),
             offsetX,
             offsetY,
             outputWidth,

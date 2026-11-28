@@ -40,6 +40,7 @@ const DEFAULT_SHADOW_PHI = 0;
 const LOG_MAX_RESOLUTION = 9;
 const LOG_MIN_RESOLUTION = 6;
 const DEFAULT_HARD_INTENSITY = 0.3;
+const WEBGPU_ANIMATED_SHADOW_INTERVAL_MS = 1000 / 30;
 
 // Fit the projection around the casters with room for the penumbra.
 const PCSS_FRUSTUM_SCALE = 4;
@@ -212,6 +213,7 @@ const _lightDirection = new Vector3();
  */
 export class Shadow extends Object3D {
   private lastRenderer: WebGLRenderer|WebGPURenderer|null = null;
+  private lastRenderTime = -Infinity;
   private mode: ShadowMode = 'basic';
 
   // ─── Shared state ───
@@ -230,6 +232,7 @@ export class Shadow extends Object3D {
   private thetaDamper = new Damper();
   private phiDamper = new Damper();
   public needsUpdate = false;
+  public animationNeedsUpdate = false;
 
   // ─── Basic mode state ───
   private basicCamera: OrthographicCamera|null = null;
@@ -546,15 +549,24 @@ export class Shadow extends Object3D {
 
   render(
       renderer: WebGLRenderer|WebGPURenderer, scene: Scene,
-      gpu?: WebGPUShadowMaterials) {
-    if (!this.needsUpdate && this.lastRenderer === renderer) return;
+      gpu?: WebGPUShadowMaterials, frameTime?: number) {
+    const elapsed = (frameTime ?? Infinity) - this.lastRenderTime;
+    // Allow for rounding of consecutive display timestamps at 60 Hz.
+    const deferAnimation = this.mode === 'basic' && elapsed >= 0 &&
+        elapsed < WEBGPU_ANIMATED_SHADOW_INTERVAL_MS - 0.5;
+    if (!this.needsUpdate && this.lastRenderer === renderer &&
+        (!this.animationNeedsUpdate || deferAnimation)) {
+      return;
+    }
     if (this.mode === 'basic') {
       this.renderBasic(renderer, scene, gpu);
     } else {
       this.renderPCSS(renderer, scene, gpu);
     }
     this.lastRenderer = renderer;
+    this.lastRenderTime = frameTime ?? -Infinity;
     this.needsUpdate = false;
+    this.animationNeedsUpdate = false;
   }
 
   invalidateCastShadow() {

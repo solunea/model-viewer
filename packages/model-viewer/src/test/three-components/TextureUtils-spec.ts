@@ -329,6 +329,34 @@ suite('TextureUtils', () => {
       expect(disposed).to.equal(true);
     });
 
+    test('evicts idle URL skyboxes before releasing displayed ones', async () => {
+      const active = new Set<Texture>();
+      textureUtils = new TextureUtils(
+          threeRenderer, () => null, texture => active.has(texture));
+      textureUtils.loadEquirect = async (url: string) => {
+        const texture = new Texture({width: 4096, height: 4096});
+        texture.name = url;
+        texture.generateMipmaps = false;
+        return texture;
+      };
+      const load = async (url: string) =>
+          (await textureUtils.generateEnvironmentMapAndSkybox(url)).skybox!;
+
+      const outgoing = await load('outgoing.jpg');
+      active.add(outgoing);
+      const idle = await load('idle.jpg');
+      const incoming = await load('incoming.jpg');
+      active.add(incoming);
+      let idleDisposed = false;
+      idle.addEventListener('dispose', () => { idleDisposed = true; });
+
+      textureUtils.releaseRetiredSkyboxes();
+      expect(idleDisposed).to.equal(true);
+      expect(await load('outgoing.jpg')).to.equal(outgoing);
+      expect(await load('incoming.jpg')).to.equal(incoming);
+      expect(await load('idle.jpg')).to.not.equal(idle);
+    });
+
     test('throws if given an invalid url', async () => {
       try {
         await textureUtils.generateEnvironmentMapAndSkybox();

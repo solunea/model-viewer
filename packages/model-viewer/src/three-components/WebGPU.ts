@@ -2,14 +2,16 @@
 /* @license Copyright 2026 Solunea. Licensed under the Apache License,
  * Version 2.0. */
 import {HDRJPGLoader} from '@monogrid/gainmap-js/webgpu';
-import type {Scene, Texture} from 'three';
-import {PMREMGenerator, WebGPURenderer} from 'three/webgpu';
+import {EquirectangularReflectionMapping, Texture} from 'three';
+import type {Scene} from 'three';
+import {CanvasTarget, DirectRenderPipeline, PMREMGenerator, WebGPURenderer} from 'three/webgpu';
 
 import EnvironmentScene from './EnvironmentScene.js';
 import type {ModelScene} from './ModelScene.js';
 import {createWebGPUPanoramaMaterial} from './WebGPUPanoramaAreas.js';
 import {createWebGPUShadowMaterials} from './WebGPUShadow.js';
-import {WebGPUSkyboxDof} from './WebGPUSkyboxDof.js';
+import {canRenderSkyboxDirectly, WebGPUSkyboxDof} from './WebGPUSkyboxDof.js';
+import {WebGPUSkyboxTransition} from './WebGPUSkyboxTransition.js';
 
 function isNativeWebGPU(renderer: WebGPURenderer): boolean {
   return (renderer.backend as {isWebGPUBackend?: boolean}).isWebGPUBackend === true;
@@ -18,8 +20,14 @@ function isNativeWebGPU(renderer: WebGPURenderer): boolean {
 export class WebGPUContext {
   readonly shadows = createWebGPUShadowMaterials();
   private skyboxDof: WebGPUSkyboxDof|null = null;
+  private panoramaPipeline: DirectRenderPipeline|null = null;
+  private panoramaTransition: WebGPUSkyboxTransition|null = null;
   private readonly pmrem: PMREMGenerator;
   private readonly environments = new Map<string, ReturnType<PMREMGenerator['fromScene']>>();
+  private readonly canvases =
+      new Map<ModelScene, {canvas: HTMLCanvasElement, target: CanvasTarget}>();
+  private readonly preparedTextures =
+      new WeakMap<Texture, {version: number, ready: Promise<void>}>();
   private readonly device: GPUDevice;
 
   private readonly onGPUError = () => this.onLost();
@@ -94,6 +102,30 @@ export class WebGPUContext {
     }
   }
 
+  async prepareTextures(textures: readonly Texture[]) {
+    const uploads: Texture[] = [];
+    const pending = new Set<Promise<void>>();
+    for (const texture of textures) {
+      if (texture.isRenderTargetTexture) continue;
+      const prepared = this.preparedTextures.get(texture);
+      if (prepared?.version === texture.version) {
+        pending.add(prepared.ready);
+      } else {
+        this.renderer.initTexture(texture);
+        uploads.push(texture);
+      }
+    }
+    if (uploads.length > 0) {
+      // Warmup and navigation can request the same texture concurrently.
+      const ready = this.device.queue.onSubmittedWorkDone();
+      for (const texture of uploads) {
+        this.preparedTextures.set(texture, {version: texture.version, ready});
+      }
+      pending.add(ready);
+    }
+    await Promise.all(pending);
+  }
+
   private environment(texture: Texture|null): Texture|null {
     if (texture == null || !texture.isRenderTargetTexture ||
         (texture.name !== 'legacy' && texture.name !== 'neutral')) {
@@ -135,15 +167,78 @@ export class WebGPUContext {
     else draw();
   }
 
+  displayCanvas(scene: ModelScene): HTMLCanvasElement|null {
+    return this.canvases.get(scene)?.canvas ?? null;
+  }
+
+  withCanvas(
+      scene: ModelScene, width: number, height: number, render: () => void) {
+    let entry = this.canvases.get(scene);
+    if (entry == null) {
+      const canvas = document.createElement('canvas');
+      canvas.id = 'webgpu-canvas';
+      canvas.classList.add('show');
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      entry = {canvas, target: new CanvasTarget(canvas)};
+      this.canvases.set(scene, entry);
+    }
+
+    const {canvas, target} = entry;
+    const previous = this.renderer.getCanvasTarget();
+    this.renderer.setCanvasTarget(target);
+    try {
+      if (canvas.width !== width || canvas.height !== height) {
+        target.setSize(width, height, false);
+      }
+      render();
+      if (canvas.parentNode == null) scene.canvas.after(canvas);
+    } finally {
+      this.renderer.setCanvasTarget(previous);
+    }
+  }
+
+  releaseCanvas(scene: ModelScene) {
+    this.panoramaTransition?.release(scene);
+    const entry = this.canvases.get(scene);
+    if (entry == null) return;
+    this.canvases.delete(scene);
+    entry.target.dispose();
+    if (entry.canvas.parentNode != null) {
+      entry.canvas.getContext('webgpu')?.unconfigure();
+      entry.canvas.remove();
+    }
+  }
+
   render(scene: ModelScene, width: number, height: number) {
+    const {renderer} = this;
     const frame = scene.getSkyboxDofFrame();
+    const transition = scene.skyboxTransitionMesh;
+    if (frame == null && transition != null &&
+        canRenderSkyboxDirectly(scene, renderer, transition)) {
+      this.panoramaTransition ??= new WebGPUSkyboxTransition();
+      this.panoramaPipeline ??= new DirectRenderPipeline(renderer);
+      if (this.panoramaTransition.render(this.panoramaPipeline, scene, transition)) {
+        return false;
+      }
+    }
+    this.panoramaTransition?.release(scene);
     if (frame != null) {
       const dof = this.skyboxDof ??= new WebGPUSkyboxDof();
       scene.camera.updateWorldMatrix(true, false);
-      dof.render(this.renderer, scene, frame, width, height);
-    } else {
-      this.renderer.render(scene, scene.camera);
+      return dof.render(renderer, scene, frame, width, height);
     }
+    const {background, camera} = scene;
+    if (background instanceof Texture &&
+        background.mapping === EquirectangularReflectionMapping &&
+        !('backgroundNode' in scene && scene.backgroundNode != null) &&
+        canRenderSkyboxDirectly(scene, renderer)) {
+      this.panoramaPipeline ??= new DirectRenderPipeline(renderer);
+      this.panoramaPipeline.render(scene, camera);
+    } else {
+      renderer.render(scene, camera);
+    }
+    return false;
   }
 
   releaseSkyboxDof() {
@@ -153,7 +248,9 @@ export class WebGPUContext {
 
   dispose() {
     this.device.removeEventListener('uncapturederror', this.onGPUError);
+    for (const scene of this.canvases.keys()) this.releaseCanvas(scene);
     this.releaseSkyboxDof();
+    this.panoramaPipeline?.dispose();
     this.shadows.depth.dispose();
     this.shadows.blur.dispose();
     for (const target of this.environments.values()) target.dispose();

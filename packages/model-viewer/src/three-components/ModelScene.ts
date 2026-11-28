@@ -1791,6 +1791,10 @@ export class ModelScene extends Scene {
     for (let i = startIndex; i < endIndex; i++) {
       this.mixerPausedStates[i] = true;
     }
+    if (this.shadow?.animationNeedsUpdate) {
+      this.queueShadowRender();
+      this.queueRender();
+    }
   }
 
   unpauseAnimation(modelIndex: number|null = null) {
@@ -1807,7 +1811,11 @@ export class ModelScene extends Scene {
         this.mixers[i].update(step);
       }
     }
-    this.queueShadowRender();
+    if (step === 0) {
+      this.queueShadowRender();
+    } else if (this.shadow != null) {
+      this.shadow.animationNeedsUpdate = true;
+    }
   }
 
   subscribeMixerEvent(
@@ -1845,10 +1853,13 @@ export class ModelScene extends Scene {
   }
 
   renderShadow(
-      renderer: WebGLRenderer|WebGPURenderer, gpu?: WebGPUShadowMaterials) {
+      renderer: WebGLRenderer|WebGPURenderer, gpu?: WebGPUShadowMaterials,
+      frameTime?: number) {
     this.updateBoundingBoxAndShadowIfDirty();
     const shadow = this.shadow;
-    shadow?.render(renderer, this, gpu);
+    shadow?.render(
+        renderer, this, gpu,
+        frameTime != null && !this.element.paused ? frameTime : undefined);
   }
 
   private queueShadowRender() {

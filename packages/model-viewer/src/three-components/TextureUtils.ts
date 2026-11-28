@@ -14,7 +14,7 @@
  */
 
 import {GainMapDecoderMaterial, HDRJPGLoader, QuadRenderer} from '@monogrid/gainmap-js';
-import {BackSide, BoxGeometry, CubeCamera, CubeTexture, DataTexture, EquirectangularReflectionMapping, HalfFloatType, LinearSRGBColorSpace, Loader, Mesh, NoBlending, NoToneMapping, RGBAFormat, Scene, ShaderMaterial, SRGBColorSpace, Texture, TextureLoader, Vector3, WebGLCubeRenderTarget, WebGLRenderer} from 'three';
+import {BackSide, BoxGeometry, CubeCamera, CubeTexture, DataTexture, EquirectangularReflectionMapping, HalfFloatType, LinearSRGBColorSpace, Loader, Mesh, NoBlending, NoToneMapping, RGBAFormat, Scene, ShaderMaterial, SRGBColorSpace, Texture, TextureLoader, TextureUtils as ThreeTextureUtils, Vector3, WebGLCubeRenderTarget, WebGLRenderer} from 'three';
 import {HDRLoader} from 'three/examples/jsm/loaders/HDRLoader.js';
 
 import {deserializeUrl, timePasses} from '../utilities.js';
@@ -33,6 +33,9 @@ interface CachedSkybox {
   withCredentials: boolean;
   maxWidth: number|null;
   texture: Promise<Texture>;
+  resident: Texture|null;
+  estimatedBytes: number;
+  pendingUsers: number;
 }
 
 const GENERATED_SIGMA = 0.04;
@@ -45,8 +48,22 @@ const HDR_JPG_FILE_RE = /(?:^|[_-])(?:hdr|gainmap)(?:[_-]|\.)/i;
 const KTX2_FILE_RE = /\.ktx2(\?|#|$)/;
 const TRANSIENT_URL_RE = /^(blob:|data:)/i;
 const SKYBOX_CACHE_KEY_PREFIX = 'skybox:';
+// Estimated storage of source textures, including mipmaps. Active scenes and
+// the caller-managed transient slots can exceed this budget.
+const SKYBOX_CACHE_MAX_BYTES = 128 * 1024 * 1024;
 
 export const SKYBOX_CACHE_KEY = 'modelViewerSkyboxCacheKey';
+
+function estimateTextureBytes(texture: Texture): number {
+  const {width, height, format, type, mipmaps} = texture;
+  if (mipmaps.length > 0) {
+    return mipmaps.reduce((bytes, image) =>
+        bytes + ThreeTextureUtils.getByteLength(
+            image.width, image.height, format, type), 0);
+  }
+  const base = ThreeTextureUtils.getByteLength(width, height, format, type);
+  return texture.generateMipmaps ? Math.ceil(base * 4 / 3) : base;
+}
 
 function disposeGainMapQuadRenderer(
     renderer: QuadRenderer<1016, GainMapDecoderMaterial>,
@@ -86,7 +103,8 @@ export default class TextureUtils {
   private generatedEnvironmentMapAlt: Promise<CubeTexture>|null = null;
 
   private skyboxCache = new Map<string, CachedSkybox>();
-  private retiredSkyboxes = new Set<Texture>();
+  private skyboxCacheBytes = 0;
+  private retiredSkyboxes = new Map<Texture, CachedSkybox>();
   private disposed = false;
 
   private blurMaterial: ShaderMaterial|null = null;
@@ -252,8 +270,6 @@ export default class TextureUtils {
         texture.colorSpace = SRGBColorSpace;
       }
 
-      this.threeRenderer.initTexture(texture);
-
       return texture;
 
     } finally {
@@ -273,7 +289,7 @@ export default class TextureUtils {
       if (maxWidth > 0 && image.width > maxWidth) {
         const height = Math.max(1, Math.round(image.height * maxWidth / image.width));
         try {
-          // Finish resizing and flipping before the synchronous GPU upload.
+          // Resize and flip together before the destination renderer uploads it.
           texture.image = await createImageBitmap(image, {
             imageOrientation: 'flipY',
             resizeWidth: maxWidth,
@@ -300,7 +316,6 @@ export default class TextureUtils {
       texture.colorSpace = SRGBColorSpace;
     }
 
-    this.threeRenderer.initTexture(texture);
     return texture;
   }
 
@@ -314,55 +329,59 @@ export default class TextureUtils {
       progressCallback: (progress: number) => void = () => {},
       withCredentials = false,
       skyboxCacheKey: string|null = null,
-      skyboxMaxWidth: number|null = null): Promise<EnvironmentMapAndSkybox> {
+      skyboxMaxWidth: number|null = null,
+      prepare?: (textures: readonly Texture[]) => Promise<void>):
+      Promise<EnvironmentMapAndSkybox> {
     const useAltEnvironment = environmentMapUrl !== 'legacy';
     if (environmentMapUrl === 'legacy' || environmentMapUrl === 'neutral') {
       environmentMapUrl = null;
     }
     environmentMapUrl = deserializeUrl(environmentMapUrl);
 
-    let skyboxLoads: Promise<Texture|null> = Promise.resolve(null);
-    let environmentMapLoads: Promise<Texture>;
+    const entries: CachedSkybox[] = [];
+    const load = (url: string, key: string|null = null,
+                  width: number|null = null) => {
+      const entry = this.loadEquirectFromUrl(
+          url, withCredentials, progressCallback, key, width);
+      ++entry.pendingUsers;
+      entries.push(entry);
+      return entry.texture;
+    };
 
-    // If we have a skybox URL, attempt to load it as a cubemap
-    if (!!skyboxUrl) {
-      skyboxLoads = this.loadEquirectFromUrl(
-          skyboxUrl, withCredentials, progressCallback, skyboxCacheKey,
-          skyboxMaxWidth);
+    try {
+      const skyboxLoads = skyboxUrl ?
+          load(skyboxUrl, skyboxCacheKey, skyboxMaxWidth) : null;
+      const environmentMapLoads = environmentMapUrl ? load(environmentMapUrl) :
+          skyboxLoads ?? (useAltEnvironment ?
+              this.loadGeneratedEnvironmentMapAlt() :
+              this.loadGeneratedEnvironmentMap());
+      const [environmentMap, skybox] =
+          await Promise.all([environmentMapLoads, skyboxLoads]);
+      if (environmentMap == null) {
+        throw new Error('Failed to load environment map.');
+      }
+      if (prepare != null && !this.disposed) {
+        // Keep both entries alive until the destination finishes preparing them.
+        const textures = skybox == null || skybox === environmentMap ?
+            [environmentMap] : [environmentMap, skybox];
+        await prepare(textures);
+      }
+      return {environmentMap, skybox};
+    } finally {
+      for (const entry of entries) {
+        --entry.pendingUsers;
+      }
     }
-
-    if (!!environmentMapUrl) {
-      // We have an available environment map URL
-      environmentMapLoads = this.loadEquirectFromUrl(
-          environmentMapUrl, withCredentials, progressCallback);
-    } else if (!!skyboxUrl) {
-      // Fallback to deriving the environment map from an available skybox
-      environmentMapLoads = skyboxLoads as Promise<Texture>;
-    } else {
-      // Fallback to generating the environment map
-      environmentMapLoads = useAltEnvironment ?
-          this.loadGeneratedEnvironmentMapAlt() :
-          this.loadGeneratedEnvironmentMap();
-    }
-
-    const [environmentMap, skybox] =
-        await Promise.all([environmentMapLoads, skyboxLoads]);
-
-    if (environmentMap == null) {
-      throw new Error('Failed to load environment map.');
-    }
-
-    return {environmentMap, skybox};
   }
 
   /**
    * Loads an equirect Texture from a given URL, for use as a skybox.
    */
-  private async loadEquirectFromUrl(
+  private loadEquirectFromUrl(
       url: string, withCredentials: boolean,
       progressCallback: (progress: number) => void,
       cacheKey: string|null = null, maxWidth: number|null = null):
-      Promise<Texture> {
+      CachedSkybox {
     const isTransientUrl = TRANSIENT_URL_RE.test(url);
     maxWidth = maxWidth != null && Number.isFinite(maxWidth) && maxWidth >= 0 ?
         Math.floor(maxWidth) : null;
@@ -373,13 +392,18 @@ export default class TextureUtils {
         this.skyboxCache.get(resolvedCacheKey);
     if (cached?.url === url && cached.maxWidth === maxWidth &&
         cached.withCredentials === withCredentials) {
-      return cached.texture;
+      if (!isTransientUrl && resolvedCacheKey != null) {
+        this.skyboxCache.delete(resolvedCacheKey);
+        this.skyboxCache.set(resolvedCacheKey, cached);
+      }
+      return cached;
     }
     if (cached != null) {
       void cached.texture.then((texture) => {
         // A replaced slot can still be visible during a crossfade.
-        if (!this.disposed && this.isSkyboxInUse(texture)) {
-          this.retiredSkyboxes.add(texture);
+        if (!this.disposed &&
+            (cached.pendingUsers > 0 || this.isSkyboxInUse(texture))) {
+          this.retiredSkyboxes.set(texture, cached);
         } else {
           texture.dispose();
         }
@@ -389,29 +413,49 @@ export default class TextureUtils {
             (isTransientUrl && resolvedCacheKey != null) ?
         this.loadTransientEquirect(url, withCredentials, maxWidth) :
         this.loadEquirect(url, withCredentials, progressCallback);
+    const entry: CachedSkybox = {
+      url, withCredentials, maxWidth, texture: pending, resident: null,
+      estimatedBytes: 0, pendingUsers: 0
+    };
     if (resolvedCacheKey == null) {
-      return pending;
+      return entry;
     }
-    const texture = pending.then((texture) => {
+    entry.texture = pending.then((texture) => {
+      if (!isTransientUrl && !this.disposed) {
+        entry.resident = texture;
+        entry.estimatedBytes = estimateTextureBytes(texture);
+        this.skyboxCacheBytes += entry.estimatedBytes;
+      }
       texture.userData[SKYBOX_CACHE_KEY] = resolvedCacheKey;
       return texture;
     });
-    const entry = {url, withCredentials, maxWidth, texture};
     this.skyboxCache.set(resolvedCacheKey, entry);
-    texture.catch(() => {
+    entry.texture.catch(() => {
       if (this.skyboxCache.get(resolvedCacheKey) === entry) {
         this.skyboxCache.delete(resolvedCacheKey);
       }
     });
-    return texture;
+    return entry;
   }
 
   releaseRetiredSkyboxes() {
-    for (const texture of this.retiredSkyboxes) {
-      if (!this.isSkyboxInUse(texture)) {
+    for (const [texture, entry] of this.retiredSkyboxes) {
+      if (entry.pendingUsers === 0 && !this.isSkyboxInUse(texture)) {
         this.retiredSkyboxes.delete(texture);
         texture.dispose();
       }
+    }
+    if (this.skyboxCacheBytes <= SKYBOX_CACHE_MAX_BYTES) return;
+    for (const [key, entry] of this.skyboxCache) {
+      const texture = entry.resident;
+      if (texture == null || entry.pendingUsers > 0 ||
+          this.isSkyboxInUse(texture)) {
+        continue;
+      }
+      this.skyboxCache.delete(key);
+      this.skyboxCacheBytes -= entry.estimatedBytes;
+      texture.dispose();
+      if (this.skyboxCacheBytes <= SKYBOX_CACHE_MAX_BYTES) break;
     }
   }
 
@@ -640,7 +684,8 @@ export default class TextureUtils {
     const pending = Array.from(this.skyboxCache.values(), ({texture}) =>
         texture.then((skybox) => skybox.dispose(), () => {}));
     this.skyboxCache.clear();
-    for (const texture of this.retiredSkyboxes) texture.dispose();
+    this.skyboxCacheBytes = 0;
+    for (const texture of this.retiredSkyboxes.keys()) texture.dispose();
     this.retiredSkyboxes.clear();
     await Promise.all(pending);
     if (this.generatedEnvironmentMap != null) {
