@@ -51,11 +51,10 @@ This regenerates the standalone and external-Three.js bundles under `dist/`.
 
 ### Render backend
 
-The viewer uses WebGL by default. Set `render-backend="webgpu"` or
-`viewer.renderBackend = 'webgpu'` to try WebGPU in a secure context with WebGL
-as a fallback. An explicit `render-backend="auto"` also tries WebGPU with the
-same fallback. Remove the attribute or set the preference to `'webgl'` to use
-WebGL.
+The default preference, `auto`, selects WebGL, as does
+`render-backend="webgl"`. Set `render-backend="webgpu"` or
+`viewer.renderBackend = 'webgpu'` to try WebGPU in a secure context. The
+viewer falls back to WebGL if WebGPU is unavailable.
 
 `activeRenderBackend` reports the backend that presented the last frame, or
 `null` before the first one. The `render-backend-change` event provides the

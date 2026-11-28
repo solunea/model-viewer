@@ -18,7 +18,7 @@ const html = `<!doctype html>
 </script>
 <script type="module" src="/viewer/model-viewer-module.min.js"></script>
 <style>model-viewer { display: inline-block; width: 300px; height: 240px }</style>
-<model-viewer src="/assets/cube.gltf" shadow-intensity="1" view-helper camera-controls></model-viewer>
+<model-viewer src="/assets/cube.gltf" shadow-intensity="1" view-helper camera-controls interaction-prompt="none"></model-viewer>
 `;
 
 async function start(t, settings = {}) {
@@ -38,9 +38,18 @@ async function start(t, settings = {}) {
     await page.addInitScript(() =>
       Object.defineProperty(Navigator.prototype, 'gpu', {value: undefined}));
   } else {
-    await page.addInitScript(() => {
+    await page.addInitScript(failGPU => {
+      globalThis.testGPUAdapterRequests = 0;
+      globalThis.testGPUDeviceRequests = 0;
+      const requestAdapter = GPU.prototype.requestAdapter;
+      GPU.prototype.requestAdapter = function (...args) {
+        ++globalThis.testGPUAdapterRequests;
+        return requestAdapter.apply(this, args);
+      };
       const original = GPUAdapter.prototype.requestDevice;
       GPUAdapter.prototype.requestDevice = async function (...args) {
+        ++globalThis.testGPUDeviceRequests;
+        if (failGPU) throw new Error('WebGPU device request failed in the test');
         const device = await original.apply(this, args);
         globalThis.testGPUDevice = device;
         return device;
@@ -52,7 +61,7 @@ async function start(t, settings = {}) {
         }
         throw new Error('Missing model-viewer renderer');
       };
-    });
+    }, settings.failGPU === true);
   }
   const markup = settings.backend == null ? html :
       html.replace('<model-viewer ', `<model-viewer render-backend="${settings.backend}" `);
@@ -95,14 +104,16 @@ async function visiblePixels(page, selector = 'model-viewer', dataURL = false) {
   }, dataURL);
 }
 
-test('prefers WebGPU by default, can force WebGL and recovers from GPU device loss', async t => {
+test('opts into WebGPU, returns to WebGL in auto mode and recovers from GPU device loss', async t => {
   const {page, errors} = await start(t);
+  await waitBackend(page, 'webgl');
+  await page.locator('model-viewer').evaluate(viewer => viewer.setAttribute('render-backend', 'webgpu'));
   await waitBackend(page, 'webgpu');
   assert.deepEqual(await page.locator('model-viewer').evaluate(viewer => ({
     preference: viewer.renderBackend,
     attribute: viewer.getAttribute('render-backend'),
-    deviceRequested: Boolean(globalThis.testGPUDevice)
-  })), {preference: 'auto', attribute: null, deviceRequested: true});
+    deviceRequests: globalThis.testGPUDeviceRequests
+  })), {preference: 'webgpu', attribute: 'webgpu', deviceRequests: 1});
   assert.equal(await page.locator('canvas#webgpu-canvas.show').count(), 1);
   assert.ok(await visiblePixels(page) > 100);
   assert.ok(await visiblePixels(page, 'model-viewer', true) > 100);
@@ -112,18 +123,18 @@ test('prefers WebGPU by default, can force WebGL and recovers from GPU device lo
     await viewer.updateComplete;
     viewer.jumpCameraToGoal();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    viewer.setAttribute('render-backend', 'webgl');
+    viewer.removeAttribute('render-backend');
     return viewer.getCameraOrbit().toString();
   });
   await waitBackend(page, 'webgl');
   assert.equal(await page.locator('canvas#webgpu-canvas').count(), 0);
-  assert.equal(await page.locator('model-viewer').evaluate(viewer => viewer.renderBackend), 'webgl');
-  assert.ok(await visiblePixels(page) > 100);
-  await page.locator('model-viewer').evaluate(viewer => viewer.removeAttribute('render-backend'));
-  await waitBackend(page, 'webgpu');
   assert.equal(await page.locator('model-viewer').evaluate(viewer => viewer.renderBackend), 'auto');
+  assert.ok(await visiblePixels(page) > 100);
+  await page.locator('model-viewer').evaluate(viewer => viewer.renderBackend = 'webgpu');
+  await waitBackend(page, 'webgpu');
   await page.evaluate(() => globalThis.testGPUDevice.destroy());
   await waitBackend(page, 'webgl');
+  assert.equal(await page.locator('model-viewer').evaluate(viewer => viewer.renderBackend), 'webgpu');
   assert.equal(await page.locator('canvas#webgpu-canvas').count(), 0);
   assert.ok(await visiblePixels(page) > 100);
   assert.equal(await page.evaluate(() => document.querySelector('model-viewer')
@@ -131,13 +142,20 @@ test('prefers WebGPU by default, can force WebGL and recovers from GPU device lo
   assert.deepEqual(errors, []);
 });
 
-test('starts in WebGL without requesting a GPU device when explicitly selected', async t => {
-  const {page, errors} = await start(t, {backend: 'webgl'});
-  await waitBackend(page, 'webgl');
-  assert.equal(await page.evaluate(() => Boolean(globalThis.testGPUDevice)), false);
-  assert.ok(await visiblePixels(page) > 100);
-  assert.deepEqual(errors, []);
-});
+for (const backend of [undefined, 'auto', 'webgl']) {
+  test(`renders in WebGL with ${backend ?? 'no'} backend attribute without probing WebGPU`, async t => {
+    const {page, errors} = await start(t, {backend});
+    await waitBackend(page, 'webgl');
+    assert.ok(await visiblePixels(page) > 100);
+    assert.deepEqual(await page.locator('model-viewer').evaluate(viewer => ({
+      preference: viewer.renderBackend,
+      attribute: viewer.getAttribute('render-backend'),
+      adapterRequests: globalThis.testGPUAdapterRequests,
+      deviceRequests: globalThis.testGPUDeviceRequests
+    })), {preference: backend ?? 'auto', attribute: backend ?? null, adapterRequests: 0, deviceRequests: 0});
+    assert.deepEqual(errors, []);
+  });
+}
 
 test('presents multiple WebGPU viewers with independently sized canvases', async t => {
   const {page, errors} = await start(t, {backend: 'webgpu'});
@@ -312,7 +330,7 @@ test('preloads panorama textures on the destination renderer', async t => {
     await Promise.all([warmWebGPU(), warmWebGPU()]);
     await warmWebGPU();
     const uploadedToWebGL = uploads.webgl.length;
-    await viewer.preloadSkybox(url, null, {renderBackend: 'webgl'});
+    await viewer.preloadSkybox(url, null, {renderBackend: 'auto'});
     return {
       uploadedToWebGL,
       gpuWaits,
@@ -396,9 +414,18 @@ test('adapts WebGPU render scale and updates contact shadows at 30 Hz', async t 
 });
 
 test('loads the same model on WebGL when WebGPU is unavailable', async t => {
-  const {page, errors} = await start(t, {disableGPU: true});
+  const {page, errors} = await start(t, {backend: 'webgpu', disableGPU: true});
   await waitBackend(page, 'webgl');
-  assert.equal(await page.locator('model-viewer').evaluate(viewer => viewer.renderBackend), 'auto');
+  assert.equal(await page.locator('model-viewer').evaluate(viewer => viewer.renderBackend), 'webgpu');
+  assert.ok(await visiblePixels(page) > 100);
+  assert.deepEqual(errors, []);
+});
+
+test('falls back to WebGL when an explicit WebGPU device request fails', async t => {
+  const {page, errors} = await start(t, {backend: 'webgpu', failGPU: true});
+  await waitBackend(page, 'webgl');
+  assert.equal(await page.evaluate(() => globalThis.testGPUDeviceRequests), 1);
+  assert.equal(await page.locator('model-viewer').evaluate(viewer => viewer.renderBackend), 'webgpu');
   assert.ok(await visiblePixels(page) > 100);
   assert.deepEqual(errors, []);
 });
@@ -795,6 +822,7 @@ test('composes a WebGPU panorama transition in one pass with the original colors
     const viewer = document.createElement('model-viewer');
     viewer.setAttribute('skybox-only', '');
     viewer.setAttribute('loading', 'eager');
+    viewer.setAttribute('render-backend', 'webgpu');
     const canvas = new OffscreenCanvas(128, 64);
     const context = canvas.getContext('2d');
     context.fillStyle = '#2458bc';

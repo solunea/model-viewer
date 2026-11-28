@@ -63,7 +63,7 @@ function html({count, width, height, dof}, backend) {
   const viewers = Array.from({length: count}, (_, index) =>
     '<model-viewer loading="eager" auto-rotate auto-rotate-delay="0" rotation-per-second="20deg" ' +
     'camera-orbit="' + (index * 17) + 'deg 75deg auto" render-backend="' +
-    (backend === 'webgl' ? 'webgl' : 'auto') + '" ' + attributes + '></model-viewer>').join('');
+    backend + '" ' + attributes + '></model-viewer>').join('');
   return '<!doctype html><script type="importmap">' +
     '{"imports":{"three":"/three/three.module.js","three/webgpu":"/three/three.webgpu.js","three/tsl":"/three/three.tsl.js"}}' +
     '</script><script type="module">import "/viewer/model-viewer-module.min.js";' +
