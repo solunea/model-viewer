@@ -29,7 +29,7 @@ import {GroundedSkybox} from './GroundedSkybox.js';
 import {Hotspot} from './Hotspot.js';
 import {Shadow, WebGPUShadowMaterials} from './Shadow.js';
 import type {WebGPURenderer} from 'three/webgpu';
-import type {PanoramaAreas} from './PanoramaAreas.js';
+import type {PanoramaAreas, PanoramaFocusMask} from './PanoramaAreas.js';
 import {depthTexture, sampleSkyboxDepth, SkyboxDepthImage, skyboxSourceFlipY} from './SkyboxDepth.js';
 import {SKYBOX_CACHE_KEY} from './TextureUtils.js';
 
@@ -116,6 +116,7 @@ export interface SkyboxDofFrame {
   invert: boolean;
   opacity: number;
   hideDuringRender: Object3D|null;
+  focusMask: PanoramaFocusMask|null;
 }
 
 /**
@@ -999,6 +1000,7 @@ export class ModelScene extends Scene {
         0,
         Number.isFinite(options.focusSmoothing) ? options.focusSmoothing : 140);
     this.skyboxDofDepthInvert = !!options.depthInvert;
+    if (!this.skyboxDofEnabled) this.panoramaAreas?.clearFocusMask();
     this.skyboxDofTargetFocus = null;
     if (this.skyboxDofFocusMode === 'manual') {
       this.skyboxDofCurrentFocus = this.skyboxDofManualFocus;
@@ -1047,6 +1049,7 @@ export class ModelScene extends Scene {
       invert: this.skyboxDofDepthInvert,
       opacity: isFadingOut ? this.skyboxTransitionOpacity : 1,
       hideDuringRender: isFadingOut ? this.skyboxTransition : null,
+      focusMask: isTransition ? null : this.panoramaAreas?.getFocusMask() ?? null,
     };
   }
 

@@ -1,4 +1,4 @@
-import {BufferAttribute, BufferGeometry, Camera, ColorManagement, EquirectangularReflectionMapping, Euler, GLSL3, HalfFloatType, LinearFilter, Matrix4, Mesh, NearestFilter, NoBlending, NoColorSpace, RGFormat, Scene, ShaderMaterial, SRGBColorSpace, SRGBTransfer, Texture, UnsignedByteType, Vector2, WebGLRenderer, WebGLRenderTarget} from 'three';
+import {BufferAttribute, BufferGeometry, Camera, ColorManagement, EquirectangularReflectionMapping, Euler, GLSL3, HalfFloatType, LinearFilter, Matrix4, Mesh, NearestFilter, NoBlending, NoColorSpace, RGFormat, Scene, ShaderMaterial, SRGBColorSpace, SRGBTransfer, Texture, UnsignedByteType, Vector2, Vector4, WebGLRenderer, WebGLRenderTarget} from 'three';
 
 import type {ModelScene, SkyboxDofFrame} from './ModelScene.js';
 import {skyboxSourceFlipY} from './SkyboxDepth.js';
@@ -26,12 +26,19 @@ uniform float invertDepth;
 uniform float focus;
 uniform float strength;
 
-vec2 panoramaUv(vec2 screen) {
-  vec3 cameraRay = (projectionInverse * vec4(screen * 2. - 1., 1., 1.)).xyz;
-  vec3 direction = normalize(mat3(cameraToSkybox) * cameraRay);
+vec3 viewRay(vec2 screen) {
+  return (projectionInverse * vec4(screen * 2. - 1., 1., 1.)).xyz;
+}
+
+vec2 directionUv(vec3 ray) {
+  vec3 direction = normalize(ray);
   float u = dot(direction.xz, direction.xz) < 1e-12 ?
       .5 : .5 + atan(direction.z, direction.x) * .15915494309;
   return vec2(fract(u), .5 + asin(clamp(direction.y, -1., 1.)) * .31830988618);
+}
+
+vec2 panoramaUv(vec2 screen) {
+  return directionUv(mat3(cameraToSkybox) * viewRay(screen));
 }
 
 float circleOfConfusion(vec2 uv) {
@@ -202,12 +209,17 @@ uniform vec2 usedArea;
 uniform float opacity;
 uniform float maxBlur;
 uniform float backgroundIntensity;
+uniform mat4 cameraToWorld;
+uniform sampler2D focusMask;
+uniform vec2 focusDimensions;
+uniform vec4 focusBounds;
 
 out vec4 result;
 #define gl_FragColor result
 
 void main() {
-  vec2 uv = panoramaUv(uvScreen);
+  vec3 ray = viewRay(uvScreen);
+  vec2 uv = directionUv(mat3(cameraToSkybox) * ray);
   vec4 sharp = panoramaColor(uv);
   float radius = circleOfConfusion(uv) * maxBlur;
   vec2 halfTexel = .5 / vec2(textureSize(nearLayer, 0));
@@ -222,6 +234,15 @@ void main() {
   }
   // The near layer is premultiplied and sits in front of the far layer.
   color = color * (1. - near.a) + near.rgb;
+  if (focusBounds.z > 0.) {
+    vec2 worldUv = directionUv(mat3(cameraToWorld) * ray);
+    vec2 maskUv = (vec2(worldUv.x, 1. - worldUv.y) * focusDimensions - focusBounds.xy)
+        / focusBounds.zw;
+    // The padding lets filtering blend to zero just outside the mask.
+    vec2 size = vec2(textureSize(focusMask, 0));
+    float amount = texture(focusMask, (maskUv * (size - 2.) + 1.) / size).r;
+    color = mix(color, sharp.rgb, amount);
+  }
 
   gl_FragColor = vec4(color * backgroundIntensity, sharp.a * opacity);
   #include <tonemapping_fragment>
@@ -326,6 +347,10 @@ export class SkyboxDof {
     usedArea: this.usedArea,
     opacity: {value: 1},
     backgroundIntensity: {value: 1},
+    cameraToWorld: {value: new Matrix4()},
+    focusMask: {value: null as Texture|null},
+    focusDimensions: {value: new Vector2()},
+    focusBounds: {value: new Vector4()},
   });
   private passMesh = new Mesh(this.geometry, this.projection);
   private backgroundMesh = new Mesh(this.geometry, this.composite);
@@ -466,6 +491,16 @@ export class SkyboxDof {
     this.composite.uniforms.opacity.value = frame.opacity;
     this.composite.uniforms.backgroundIntensity.value =
         scene.backgroundIntensity;
+    const {focusMask} = frame;
+    const uniforms = this.composite.uniforms;
+    if (focusMask != null) {
+      uniforms.cameraToWorld.value.copy(camera.matrixWorld);
+      uniforms.focusMask.value = focusMask.texture;
+      uniforms.focusDimensions.value.copy(focusMask.dimensions);
+      uniforms.focusBounds.value.copy(focusMask.bounds);
+    } else {
+      uniforms.focusBounds.value.set(0, 0, 0, 0);
+    }
     if (this.composite.toneMapped !== hdr) {
       this.composite.toneMapped = hdr;
       this.composite.needsUpdate = true;
@@ -502,6 +537,7 @@ export class SkyboxDof {
       renderer.autoClear = true;
       this.common.colorTexture.value = null;
       this.common.depthTexture.value = null;
+      uniforms.focusMask.value = null;
     }
   }
 

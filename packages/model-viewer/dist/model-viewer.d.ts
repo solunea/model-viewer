@@ -1,6 +1,6 @@
 /// <reference types="@webgpu/types" />
 import * as three from 'three';
-import { Object3D, Material as Material$4, Texture as Texture$4, Group, Vector3 as Vector3$1, Mesh as Mesh$1, OrthographicCamera as OrthographicCamera$1, DirectionalLight, WebGLRenderer, Scene as Scene$1, DataTexture, Color, Vector2, Vector4, AnimationActionLoopStyles, PerspectiveCamera as PerspectiveCamera$1, Camera as Camera$2, Box3, Sphere, ToneMapping, SphereGeometry, MeshBasicMaterial, AnimationMixerEventMap, Intersection, XRTargetRaySpace, Matrix4 as Matrix4$1, EventDispatcher, Event as Event$1, MeshPhysicalMaterial } from 'three';
+import { Object3D, Material as Material$4, Texture as Texture$4, Group, Vector3 as Vector3$1, Mesh as Mesh$1, OrthographicCamera as OrthographicCamera$1, DirectionalLight, WebGLRenderer, Scene as Scene$1, DataTexture, Vector2, Vector4, Color, AnimationActionLoopStyles, PerspectiveCamera as PerspectiveCamera$1, Camera as Camera$2, Box3, Sphere, ToneMapping, SphereGeometry, MeshBasicMaterial, AnimationMixerEventMap, Intersection, XRTargetRaySpace, Matrix4 as Matrix4$1, EventDispatcher, Event as Event$1, MeshPhysicalMaterial } from 'three';
 export { CanvasTexture, FileLoader, Loader, NearestFilter } from 'three';
 import * as three_examples_jsm_loaders_GLTFLoader_js from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTF as GLTF$2, GLTFReference, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -983,6 +983,11 @@ interface PanoramaAreaMaterial {
     material: Material$4;
     update(mask: DataTexture, progress: number): void;
 }
+interface PanoramaFocusMask {
+    texture: DataTexture;
+    dimensions: Vector2;
+    bounds: Vector4;
+}
 type CreatePanoramaAreaMaterial = (mask: DataTexture, color: Color, dimensions: Vector2, bounds: Vector4) => PanoramaAreaMaterial;
 /** Internal scene-root overlay. Never added to the exportable model target. */
 declare class PanoramaAreas extends Group {
@@ -990,6 +995,8 @@ declare class PanoramaAreas extends Group {
     private textureLimit;
     private areas;
     private highlighted;
+    private focused;
+    private focusMask;
     private mesh;
     private webglMaterial;
     private webgpuMaterial;
@@ -1005,6 +1012,9 @@ declare class PanoramaAreas extends Group {
     constructor(scene: ModelScene, textureLimit?: number);
     setAreas(areas: readonly PanoramaAreaDefinition[]): void;
     setHighlight(name: string | null, color?: string): void;
+    setFocus(name: string | null): void;
+    getFocusMask(): PanoramaFocusMask | null;
+    clearFocusMask(): void;
     setShine(enabled: boolean): void;
     tick(time: number): void;
     setActive(active: boolean): void;
@@ -1052,6 +1062,7 @@ interface SkyboxDofFrame {
     invert: boolean;
     opacity: number;
     hideDuringRender: Object3D | null;
+    focusMask: PanoramaFocusMask | null;
 }
 /**
  * A THREE.Scene object that takes a Model and CanvasHTMLElement and
@@ -2797,6 +2808,7 @@ declare interface AnnotationInterface {
 interface PanoramaAreasInterface {
     setPanoramaAreas(areas: readonly PanoramaAreaDefinition[]): void;
     setPanoramaAreaHighlight(name: string | null, color?: string): void;
+    setPanoramaAreaFocus(name: string | null): void;
     setPanoramaAreaShine(enabled: boolean): void;
     panoramaAreaFromPoint(clientX: number, clientY: number): PanoramaAreaHit | null;
 }

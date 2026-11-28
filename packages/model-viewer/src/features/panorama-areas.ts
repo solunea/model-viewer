@@ -11,6 +11,7 @@ export type{PanoramaAreaDefinition, PanoramaAreaHit} from '../three-components/P
 export interface PanoramaAreasInterface {
   setPanoramaAreas(areas: readonly PanoramaAreaDefinition[]): void;
   setPanoramaAreaHighlight(name: string|null, color?: string): void;
+  setPanoramaAreaFocus(name: string|null): void;
   setPanoramaAreaShine(enabled: boolean): void;
   panoramaAreaFromPoint(clientX: number, clientY: number): PanoramaAreaHit|null;
 }
@@ -59,6 +60,10 @@ export const PanoramaAreasMixin =
 
         setPanoramaAreaHighlight(name: string|null, color?: string) {
           this[$areas].setHighlight(name, color);
+        }
+
+        setPanoramaAreaFocus(name: string|null) {
+          this[$areas].setFocus(name);
         }
 
         setPanoramaAreaShine(enabled: boolean) {

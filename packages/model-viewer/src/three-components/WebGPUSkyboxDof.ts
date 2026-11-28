@@ -1,6 +1,6 @@
 /* @license Copyright 2026 Solunea. Licensed under the Apache License,
  * Version 2.0. */
-import {BufferAttribute, BufferGeometry, ColorManagement, EquirectangularReflectionMapping, HalfFloatType, Matrix4, Mesh, NoBlending, RenderTarget, SRGBTransfer, Texture, Vector2} from 'three';
+import {BufferAttribute, BufferGeometry, ColorManagement, DataTexture, EquirectangularReflectionMapping, HalfFloatType, LinearFilter, Matrix4, Mesh, NoBlending, RedFormat, RenderTarget, SRGBTransfer, Texture, Vector2, Vector4} from 'three';
 import {Fn, If, Loop, asin, atan, clamp, dot, float, fract, int, length, max, min, mix, normalize, outputStruct, positionGeometry, property, select, smoothstep, step, texture, textureSize, uniform, uniformArray, uv, vec2, vec4, viewportUV} from 'three/tsl';
 import {NodeMaterial, QuadMesh, WebGPURenderer} from 'three/webgpu';
 import type {Node} from 'three/webgpu';
@@ -42,6 +42,11 @@ export class WebGPUSkyboxDof {
   private readonly skyboxRotation = new Matrix4();
   private readonly color = texture(new Texture());
   private readonly depth = texture(new Texture());
+  private readonly cameraToWorld = uniform(new Matrix4());
+  private readonly emptyMask = new DataTexture(new Uint8Array(1), 1, 1, RedFormat);
+  private readonly focusMask = texture(this.emptyMask);
+  private readonly focusDimensions = uniform(new Vector2());
+  private readonly focusBounds = uniform(new Vector4());
   private readonly flipDepthY = uniform(0);
   private readonly depthIs16Bit = uniform(0);
   private readonly invert = uniform(0);
@@ -62,18 +67,24 @@ export class WebGPUSkyboxDof {
   private readonly sampleCount = uniform(16, 'int');
 
   constructor() {
+    // A separate fallback prevents TSL from merging the mask and depth bindings.
+    this.emptyMask.minFilter = this.emptyMask.magFilter = LinearFilter;
+    this.emptyMask.needsUpdate = true;
     this.background.frustumCulled = false;
     this.background.renderOrder = -Infinity;
     this.background.userData.noHit = true;
     this.composite.vertexNode = vec4(positionGeometry.xy, 0, 1);
 
-    const panoramaUV = (screen: Node<'vec2'>) => {
-      const ray = this.projectionInverse.mul(vec4(screen.mul(2).sub(1), 1, 1));
-      const direction = normalize(this.cameraToSkybox.mul(vec4(ray.xyz, 0)).xyz);
+    const viewRay = (screen: Node<'vec2'>) =>
+      vec4(this.projectionInverse.mul(vec4(screen.mul(2).sub(1), 1, 1)).xyz, 0);
+    const directionUV = (ray: Node<'vec3'>) => {
+      const direction = normalize(ray);
       return vec2(
           fract(float(.5).add(atan(direction.z, direction.x).div(2 * Math.PI))),
           float(.5).add(asin(clamp(direction.y, -1, 1)).div(Math.PI)));
     };
+    const panoramaUV = (screen: Node<'vec2'>) =>
+      directionUV(this.cameraToSkybox.mul(viewRay(screen)).xyz);
     const radiusAt = (panorama: Node<'vec2'>) => {
       const depthUV = vec2(panorama.x, mix(panorama.y, panorama.y.oneMinus(), this.flipDepthY));
       const value = vec4(this.depth.sample(depthUV)).toVar();
@@ -175,7 +186,8 @@ export class WebGPUSkyboxDof {
     const farLayer = texture(farTexture);
     this.composite.fragmentNode = Fn(() => {
       const screen = viewportUV;
-      const panorama = panoramaUV(vec2(screen.x, screen.y.oneMinus()));
+      const ray = viewRay(vec2(screen.x, screen.y.oneMinus()));
+      const panorama = directionUV(this.cameraToSkybox.mul(ray).xyz);
       const sharp = colorAt(panorama);
       const radius = radiusAt(panorama).mul(this.maxBlur);
       const projected = screen.sub(.5).mul(this.crop).add(.5);
@@ -183,7 +195,15 @@ export class WebGPUSkyboxDof {
       const far = farLayer.sample(projected);
       const defocus = smoothstep(.5, 1.5, radius.abs());
       const color = mix(sharp.rgb, far.rgb, far.a.mul(defocus))
-                        .mul(near.a.oneMinus()).add(near.rgb);
+                        .mul(near.a.oneMinus()).add(near.rgb).toVar();
+      If(this.focusBounds.z.greaterThan(0), () => {
+        const worldUV = directionUV(this.cameraToWorld.mul(ray).xyz);
+        const maskUV = vec2(worldUV.x, worldUV.y.oneMinus()).mul(this.focusDimensions)
+                           .sub(this.focusBounds.xy).div(this.focusBounds.zw);
+        const size = textureSize(this.focusMask) as unknown as Node<'vec2'>;
+        const amount = this.focusMask.sample(maskUV.mul(size.sub(2)).add(1).div(size)).r;
+        color.assign(mix(color, sharp.rgb, amount));
+      });
       return vec4(color.mul(this.intensity), sharp.a.mul(this.opacity));
     })();
   }
@@ -215,6 +235,15 @@ export class WebGPUSkyboxDof {
     this.radiusScale.value.set(1 / paddedWidth, 1 / paddedHeight);
     this.color.value = frame.skybox;
     this.depth.value = frame.depth;
+    const {focusMask} = frame;
+    this.focusMask.value = focusMask?.texture ?? this.emptyMask;
+    if (focusMask != null) {
+      this.cameraToWorld.value.copy(scene.camera.matrixWorld);
+      this.focusDimensions.value.copy(focusMask.dimensions);
+      this.focusBounds.value.copy(focusMask.bounds);
+    } else {
+      this.focusBounds.value.set(0, 0, 0, 0);
+    }
     this.flipDepthY.value = frame.skybox.flipY ? 1 : 0;
     this.depthIs16Bit.value = frame.bitDepth === 16 ? 1 : 0;
     this.invert.value = frame.invert ? 1 : 0;
@@ -261,10 +290,12 @@ export class WebGPUSkyboxDof {
       renderer.setRenderTarget(target);
       renderer.setMRT(previousMRT);
       renderer.autoClear = autoClear;
+      this.focusMask.value = this.emptyMask;
     }
   }
 
   dispose() {
+    this.emptyMask.dispose();
     this.background.geometry.dispose();
     this.projection.dispose();
     this.layers.dispose();

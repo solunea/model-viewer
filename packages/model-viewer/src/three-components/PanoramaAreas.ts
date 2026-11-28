@@ -1,6 +1,6 @@
 /* @license Copyright 2026 Solunea. Licensed under the Apache License,
  * Version 2.0. */
-import {BackSide, Color, DataTexture, Group, Material, Mesh, NearestFilter, Raycaster, RedFormat, ShaderMaterial, Sphere, SphereGeometry, Vector2, Vector3, Vector4} from 'three';
+import {BackSide, Color, DataTexture, Group, LinearFilter, Material, Mesh, NearestFilter, Raycaster, RedFormat, ShaderMaterial, Sphere, SphereGeometry, Vector2, Vector3, Vector4} from 'three';
 
 import {ModelScene} from './ModelScene.js';
 
@@ -24,6 +24,12 @@ export interface PanoramaAreaHit {
 export interface PanoramaAreaMaterial {
   material: Material;
   update(mask: DataTexture, progress: number): void;
+}
+
+export interface PanoramaFocusMask {
+  texture: DataTexture;
+  dimensions: Vector2;
+  bounds: Vector4;
 }
 
 export type CreatePanoramaAreaMaterial =
@@ -87,10 +93,41 @@ function combineMasks(areas: PanoramaAreaDefinition[], limit: number): PanoramaA
   return {name: '', mask: {width, height, bounds: {x: 0, y: 0, width, height}, bits}};
 }
 
+function createMaskTexture(area: PanoramaAreaDefinition, limit: number, border = 0) {
+  const {width, bounds, bits} = area.mask;
+  const scale = Math.max(1, Math.ceil(
+      Math.max(bounds.width, bounds.height) / Math.max(1, limit - 2 * border)));
+  const tw = Math.ceil(bounds.width / scale) + 2 * border;
+  const th = Math.ceil(bounds.height / scale) + 2 * border;
+  const pixels = new Uint8Array(tw * th);
+  for (let y = 0; y < bounds.height; y++) {
+    const row = (Math.floor(y / scale) + border) * tw + border;
+    for (let x = 0; x < bounds.width; x++) {
+      const p = y * bounds.width + x;
+      if (bits[p >> 3] & (1 << (p & 7))) {
+        pixels[row + Math.floor(x / scale)] = 255;
+      }
+    }
+  }
+  if (border && bounds.width === width) {
+    for (let y = 1; y < th - 1; y++) {
+      const row = y * tw;
+      pixels[row] = pixels[row + tw - 2];
+      pixels[row + tw - 1] = pixels[row + 1];
+    }
+  }
+  const texture = new DataTexture(pixels, tw, th, RedFormat);
+  texture.minFilter = texture.magFilter = border ? LinearFilter : NearestFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 /** Internal scene-root overlay. Never added to the exportable model target. */
 export class PanoramaAreas extends Group {
   private areas = new Map<string, PanoramaAreaDefinition>();
   private highlighted: string|null = null;
+  private focused: string|null = null;
+  private focusMask: PanoramaFocusMask|null = null;
   private mesh: Mesh<SphereGeometry, Material>|null = null;
   private webglMaterial: ShaderMaterial|null = null;
   private webgpuMaterial: PanoramaAreaMaterial|null = null;
@@ -133,6 +170,10 @@ export class PanoramaAreas extends Group {
         [...next].some(([name, area]) => this.areas.get(name) !== area)) {
       this.shineArea = null;
     }
+    if (this.focused != null && this.areas.get(this.focused) !== next.get(this.focused)) {
+      this.clearFocusMask();
+      this.scene.queueRender();
+    }
     this.areas = next;
     this.update();
   }
@@ -147,6 +188,29 @@ export class PanoramaAreas extends Group {
     this.highlighted = name;
     this.update();
     if (colorChanged && this.visible) this.scene.queueRender();
+  }
+
+  setFocus(name: string|null) {
+    if (this.focused === name) return;
+    this.focused = name;
+    this.clearFocusMask();
+    this.scene.queueRender();
+  }
+
+  getFocusMask(): PanoramaFocusMask|null {
+    const area = this.active && this.focused != null ? this.areas.get(this.focused) : null;
+    if (!area || !area.mask.bounds.width || !area.mask.bounds.height) return null;
+    const {width, height, bounds} = area.mask;
+    return this.focusMask ??= {
+      texture: createMaskTexture(area, Math.min(4096, this.textureLimit), 1),
+      dimensions: new Vector2(width, height),
+      bounds: new Vector4(bounds.x, bounds.y, bounds.width, bounds.height)
+    };
+  }
+
+  clearFocusMask() {
+    this.focusMask?.texture.dispose();
+    this.focusMask = null;
   }
 
   setShine(enabled: boolean) {
@@ -173,6 +237,7 @@ export class PanoramaAreas extends Group {
       return;
     }
     this.active = active;
+    if (!active) this.clearFocusMask();
     this.update();
   }
 
@@ -292,24 +357,12 @@ export class PanoramaAreas extends Group {
         this.add(this.mesh);
       }
       if (this.uploaded !== area) {
-        const {width, height, bounds, bits} = area.mask;
+        const {width, height, bounds} = area.mask;
         // Only visual sampling is reduced; detection always uses the original
         // bits.
         const limit = Math.min(4096, this.textureLimit);
-        const scale = Math.max(
-            1, Math.ceil(Math.max(bounds.width, bounds.height) / limit));
-        const tw = Math.ceil(bounds.width / scale);
-        const th = Math.ceil(bounds.height / scale);
-        const pixels = new Uint8Array(tw * th);
-        for (let p = 0; p < bounds.width * bounds.height; p++) {
-          if (bits[p >> 3] & (1 << (p & 7))) {
-            pixels[Math.floor(Math.floor(p / bounds.width) / scale) * tw + Math.floor(p % bounds.width / scale)] = 255;
-          }
-        }
         this.texture?.dispose();
-        this.texture = new DataTexture(pixels, tw, th, RedFormat);
-        this.texture.minFilter = this.texture.magFilter = NearestFilter;
-        this.texture.needsUpdate = true;
+        this.texture = createMaskTexture(area, limit);
         const {uniforms} = this.webglMaterial!;
         uniforms.mask.value = this.texture;
         uniforms.panorama.value.set(width, height);
@@ -371,6 +424,7 @@ export class PanoramaAreas extends Group {
 
   dispose() {
     this.releaseGraphics();
+    this.setFocus(null);
     this.active = false;
     this.visible = false;
     this.removeFromParent();
